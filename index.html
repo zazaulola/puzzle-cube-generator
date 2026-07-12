@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Puzzle Cube — STL Generator</title>
+<meta name="description" content="Generator of 3D-printable puzzle cubes: unique pixel-style pieces, 4-color mode, STL + ZIP export. Runs entirely in the browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<aside class="panel">
+  <header class="brand">
+    <div class="brand-mark">⬢</div>
+    <div>
+      <h1 data-i18n="brand">PUZZLE·CUBE</h1>
+      <p data-i18n="tagline">STL generator for 3D printing</p>
+    </div>
+    <select id="lang-select" class="lang">
+      <option value="en">EN</option>
+      <option value="ru">RU</option>
+      <option value="de">DE</option>
+      <option value="fr">FR</option>
+      <option value="es">ES</option>
+    </select>
+  </header>
+
+  <section class="ctrl">
+    <label class="ctrl-label" data-i18n="difficulty">Difficulty</label>
+    <div class="seg" id="seg-difficulty">
+      <button data-v="1"><b>1</b><i>12</i></button>
+      <button data-v="2" class="on"><b>2</b><i>48</i></button>
+      <button data-v="3"><b>3</b><i>108</i></button>
+      <button data-v="4"><b>4</b><i>192</i></button>
+    </div>
+  </section>
+
+  <section class="ctrl">
+    <label class="ctrl-label" data-i18n="colors">Colors</label>
+    <div class="seg" id="seg-colors">
+      <button data-v="1"><b>1</b><i data-i18n="oneColor">single color</i></button>
+      <button data-v="4" class="on"><b>4</b><i data-i18n="adjacentDiff">neighbors ≠</i></button>
+    </div>
+    <div id="color-pickers" class="pickers">
+      <input type="color"><input type="color"><input type="color"><input type="color">
+    </div>
+  </section>
+
+  <section class="ctrl">
+    <label class="ctrl-label" data-i18n="scale">Scale</label>
+    <div class="seg" id="seg-scale">
+      <button data-v="1" class="on"><b>1×</b><i data-i18n="plates1">1 plate</i></button>
+      <button data-v="2"><b>2×</b><i data-i18n="plates2">2 plates</i></button>
+      <button data-v="3"><b>3×</b><i data-i18n="plates3">3 plates</i></button>
+    </div>
+    <p class="note" data-i18n="scaleNote">plates per color; more plates → bigger pieces</p>
+  </section>
+
+  <section class="ctrl grid2">
+    <div>
+      <label class="ctrl-label" data-i18n="cubeEdge">Cube edge, mm</label>
+      <input class="num" id="inp-edge" type="text">
+      <label class="chk"><input type="checkbox" id="chk-auto" checked><span data-i18n="autoFit">auto-fit to plates</span></label>
+    </div>
+    <div>
+      <label class="ctrl-label" data-i18n="thicknessCell">Thickness = cell</label>
+      <input class="num" id="inp-thickness" type="text" disabled>
+      <p class="note" data-i18n="thicknessNote">piece thickness equals the puzzle cell</p>
+    </div>
+    <div>
+      <label class="ctrl-label" data-i18n="clearance">Clearance/side, mm</label>
+      <input class="num" id="inp-clearance" type="text">
+    </div>
+    <div>
+      <label class="ctrl-label" data-i18n="seed">Seed</label>
+      <div class="seed-row">
+        <input class="num" id="inp-seed" type="text">
+        <button id="btn-reseed" data-i18n-title="reseedTip" title="random cutting variant">⟳</button>
+      </div>
+    </div>
+    <div>
+      <label class="ctrl-label" data-i18n="bedX">Plate X, mm</label>
+      <input class="num" id="inp-bedw" type="text">
+    </div>
+    <div>
+      <label class="ctrl-label" data-i18n="bedY">Plate Y, mm</label>
+      <input class="num" id="inp-bedh" type="text">
+    </div>
+  </section>
+
+  <div id="warnings"></div>
+
+  <section class="ctrl files">
+    <label class="ctrl-label"><span data-i18n="files">Files</span> <span class="hint"><span id="dl-count">0</span> <span data-i18n="pcs">pcs</span></span></label>
+    <div id="file-list"></div>
+    <button class="zip-btn" id="btn-zip" data-i18n="downloadAll">DOWNLOAD ALL · ZIP</button>
+  </section>
+
+  <footer class="colophon">
+    <span data-i18n="colophon1">pieces print flat · no supports needed</span><br>
+    <span data-i18n="colophon2">faces interlock with ±1-cell edge teeth</span><br>
+    <span data-i18n="colophon3">every piece is unique</span>
+  </footer>
+</aside>
+
+<main class="stage">
+  <div class="statbar">
+    <div class="stat"><b id="stat-pieces">—</b><span data-i18n="stPieces">pieces</span></div>
+    <div class="stat"><b id="stat-perface">—</b><span data-i18n="stPerFace">per face</span></div>
+    <div class="stat"><b id="stat-edge">—</b><span data-i18n="stEdge">cube edge</span></div>
+    <div class="stat"><b id="stat-cell">—</b><span data-i18n="stPiece">piece 8×4</span></div>
+    <div class="stat"><b id="stat-thick">—</b><span data-i18n="stCell">cell/thick.</span></div>
+    <div class="stat"><b id="stat-unique">—</b><span data-i18n="stUnique">unique</span></div>
+    <div class="stat"><b id="stat-plates">—</b><span><span data-i18n="stPlates">plates</span> <em id="stat-plates-note"></em></span></div>
+    <div class="tabs">
+      <button class="tab on" data-view="net" data-i18n="tabNet">NET</button>
+      <button class="tab" data-view="plates" data-i18n="tabPlates">PLATES</button>
+    </div>
+  </div>
+
+  <div id="view-net" class="view">
+    <canvas id="net-canvas"></canvas>
+  </div>
+  <div id="view-plates" class="view" style="display:none">
+    <div id="plates-grid"></div>
+  </div>
+</main>
+
+<script src="js/i18n.js?v=10"></script>
+<script src="js/geometry.js?v=10"></script>
+<script src="js/pieces.js?v=10"></script>
+<script src="js/layout.js?v=10"></script>
+<script src="js/stl.js?v=10"></script>
+<script src="js/preview.js?v=10"></script>
+<script src="js/app.js?v=10"></script>
+</body>
+</html>
