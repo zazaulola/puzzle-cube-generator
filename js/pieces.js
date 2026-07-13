@@ -18,6 +18,12 @@
 
 const CELL = 8; // cells per tile (an 8×8 tile → two 8×4 elements)
 
+/* Dovetail flare, in cell units per side. Rectangular teeth have no
+   undercut and hold nothing; flaring every tooth tip outward and its
+   base inward turns each tooth into a dovetail, so pieces press in
+   from above and lock in-plane like a real jigsaw. */
+const DOVETAIL = 0.15;
+
 function pieceCount(d) { return 12 * d * d; }
 
 function buildPuzzle(params) {
@@ -34,13 +40,48 @@ function buildPuzzle(params) {
   }
   if (!built) throw new Error('Failed to generate a valid cutting — try another seed');
 
+  // Per-face ownership grids — the dovetail rule needs to know which
+  // element owns each of the four cells around an outline vertex.
+  const faceIdx = Object.fromEntries(FACE_DEFS.map((fd, k) => [fd.name, k]));
+  const ownerGrid = FACE_DEFS.map(() => new Int32Array(N * N).fill(-1));
+  built.elements.forEach((el, k) => {
+    const g = ownerGrid[faceIdx[el.face]];
+    for (const [i, j] of el.cells) g[j * N + i] = k;
+  });
+  const cellAt = (fi, i, j) =>
+    (i < 0 || j < 0 || i >= N || j >= N) ? -1 : ownerGrid[fi][j * N + i];
+
+  /* Dovetail displacement of an outline vertex. Around every corner of
+     the pixel outline sit four cells; on a two-piece wall the pattern is
+     3+1, and moving the vertex diagonally AWAY from the minority cell
+     widens tooth tips and narrows tooth bases. Both pieces compute the
+     same displacement for the shared point, so the fit stays exact.
+     Vertices next to the face rim, foreign voxels or 3-piece junctions
+     are left in place (the 3D edge joints must stay straight). */
+  const dovetail = (fi, x, y) => {
+    const quads = [[x - 1, y - 1], [x, y - 1], [x - 1, y], [x, y]];
+    const owners = quads.map(q => cellAt(fi, q[0], q[1]));
+    if (owners.includes(-1)) return [x, y];
+    const uniq = [...new Set(owners)];
+    if (uniq.length !== 2) return [x, y];
+    const minority = uniq.find(o => owners.filter(v => v === o).length === 1);
+    if (minority === undefined) return [x, y]; // 2–2 pattern
+    const [ci, cj] = quads[owners.indexOf(minority)];
+    const qx = ci >= x ? 1 : -1, qy = cj >= y ? 1 : -1;
+    return [x - qx * DOVETAIL, y - qy * DOVETAIL];
+  };
+
   const faces = FACE_DEFS.map(fd => ({ name: fd.name, pieces: [] }));
   const byName = Object.fromEntries(faces.map(f => [f.name, f]));
   const pieces = [];
   for (const el of built.elements) {
+    const fi = faceIdx[el.face];
     const piece = {
       id: el.id, face: el.face, color: 0,
-      poly: el.outline.map(p => [p[0] * c, p[1] * c]),
+      poly: mergeCollinear(el.outline.map(p => {
+        const [x, y] = dovetail(fi, p[0], p[1]);
+        return [x * c, y * c];
+      })),
       cellCount: el.cells.length,
     };
     byName[el.face].pieces.push(piece);
@@ -424,14 +465,20 @@ function traceOutline(cells) {
     if (++steps > total + 2) return null;
   } while (cur[0] !== start[0] || cur[1] !== start[1]);
   if (next.size !== 0) return null; // a hole or a second loop remains
-  // merge collinear points
+  // NB: collinear points are kept — the dovetail displacement must see
+  // every boundary grid point so neighboring pieces stay complementary;
+  // merging happens after displacement (mergeCollinear).
+  return poly;
+}
+
+// Drop vertices whose adjacent edges are collinear
+function mergeCollinear(poly) {
   const out = [];
   const n = poly.length;
   for (let k = 0; k < n; k++) {
     const p0 = poly[(k - 1 + n) % n], p1 = poly[k], p2 = poly[(k + 1) % n];
-    const d1x = p1[0] - p0[0], d1y = p1[1] - p0[1];
-    const d2x = p2[0] - p1[0], d2y = p2[1] - p1[1];
-    if (d1x * d2y - d1y * d2x !== 0) out.push(p1);
+    const cr = (p1[0] - p0[0]) * (p2[1] - p1[1]) - (p1[1] - p0[1]) * (p2[0] - p1[0]);
+    if (Math.abs(cr) > 1e-9) out.push(p1);
   }
   return out;
 }

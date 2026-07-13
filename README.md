@@ -9,7 +9,7 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 ## The puzzle
 
 - The cube is a hollow box of six flat plates; each face is an `d×d` grid of 8×8-cell tiles, and every tile is cut into two **8×4 elements**, with cut orientations alternating in a checkerboard that stays consistent across the cube edges.
-- Borders between neighboring elements wander randomly by **−1/0/+1 cells**, so every piece gets a unique pixelated outline (verified against all rotations and reflections — duplicates are regenerated).
+- Borders between neighboring elements wander randomly by **−1/0/+1 cells**, so every piece gets a unique pixelated outline (verified against all rotations and reflections — duplicates are regenerated). Every tooth is flared into a small **dovetail** (wider at the tip), so pieces press in flat from above and lock together in the plane of the face — straight rectangular teeth would have no undercut and would not hold.
 - Along the cube edges each rim cell goes to exactly one of the two meeting faces (**−1/+1**, never flush), forming a random box joint; the plate thickness equals the cell size, so joints are flush and the assembled cube reads as a seamless voxel lattice. Each cube corner cell belongs to one of the three pieces meeting at that corner.
 - The faces are assembled flat on the table, then slid together; the edge teeth interlock and hold the cube without glue.
 

@@ -43,7 +43,7 @@ const I18N = {
     rm_element: 'each element is 8×4 cells',
     rm_unique: 'All pieces are unique',
     rm_print: 'Printing: pieces lie flat, no supports needed (3–4 perimeters, 15–25% infill).',
-    rm_assembly: 'Assembly: build each face on the table, then slide the faces together — the edge teeth of neighboring faces interlock and hold the cube without glue. Each cube corner belongs to one of the three meeting pieces.',
+    rm_assembly: 'Assembly: build each face on the table, then slide the faces together — the edge teeth of neighboring faces interlock and hold the cube without glue. Each cube corner belongs to one of the three meeting pieces. Pieces press in flat from above — the dovetail teeth lock them in the plane.',
   },
   ru: {
     pageTitle: 'Пазл-куб — генератор STL',
@@ -82,7 +82,7 @@ const I18N = {
     rm_element: 'каждый элемент — 8×4 клетки',
     rm_unique: 'Все детали уникальны',
     rm_print: 'Печать: детали лежат плоско, поддержки не нужны (3–4 периметра, заполнение 15–25%).',
-    rm_assembly: 'Сборка: соберите каждую грань на столе, затем наденьте грани друг на друга — кромочные зубцы соседних граней зацепляются и держат куб без клея. Каждый угол куба принадлежит одной из трёх сходящихся деталей.',
+    rm_assembly: 'Сборка: соберите каждую грань на столе, затем наденьте грани друг на друга — кромочные зубцы соседних граней зацепляются и держат куб без клея. Каждый угол куба принадлежит одной из трёх сходящихся деталей. Детали вставляются нажатием сверху — зубцы-ласточкины хвосты запирают их в плоскости.',
   },
   de: {
     pageTitle: 'Puzzle-Würfel — STL-Generator',
@@ -121,7 +121,7 @@ const I18N = {
     rm_element: 'jedes Element besteht aus 8×4 Zellen',
     rm_unique: 'Alle Teile sind Unikate',
     rm_print: 'Druck: Teile liegen flach, keine Stützen nötig (3–4 Konturen, 15–25 % Füllung).',
-    rm_assembly: 'Montage: jede Fläche auf dem Tisch zusammensetzen, dann die Flächen ineinanderschieben — die Randzähne benachbarter Flächen verzahnen sich und halten den Würfel ohne Kleber. Jede Würfelecke gehört zu einem der drei zusammentreffenden Teile.',
+    rm_assembly: 'Montage: jede Fläche auf dem Tisch zusammensetzen, dann die Flächen ineinanderschieben — die Randzähne benachbarter Flächen verzahnen sich und halten den Würfel ohne Kleber. Jede Würfelecke gehört zu einem der drei zusammentreffenden Teile. Die Teile werden flach von oben eingedrückt — die Schwalbenschwanz-Zähne verriegeln sie in der Ebene.',
   },
   fr: {
     pageTitle: 'Cube Puzzle — générateur STL',
@@ -160,7 +160,7 @@ const I18N = {
     rm_element: 'chaque élément fait 8×4 cellules',
     rm_unique: 'Toutes les pièces sont uniques',
     rm_print: 'Impression : pièces à plat, sans supports (3–4 périmètres, remplissage 15–25 %).',
-    rm_assembly: "Assemblage : montez chaque face sur la table, puis emboîtez les faces — les dents de bord des faces voisines s'enclenchent et tiennent le cube sans colle. Chaque coin du cube appartient à l'une des trois pièces qui s'y rejoignent.",
+    rm_assembly: "Assemblage : montez chaque face sur la table, puis emboîtez les faces — les dents de bord des faces voisines s'enclenchent et tiennent le cube sans colle. Chaque coin du cube appartient à l'une des trois pièces qui s'y rejoignent. Les pièces s'enfoncent à plat par le dessus — les dents en queue d'aronde les verrouillent dans le plan.",
   },
   es: {
     pageTitle: 'Cubo Puzzle — generador STL',
@@ -199,7 +199,7 @@ const I18N = {
     rm_element: 'cada elemento es de 8×4 celdas',
     rm_unique: 'Todas las piezas son únicas',
     rm_print: 'Impresión: piezas en plano, sin soportes (3–4 perímetros, relleno 15–25 %).',
-    rm_assembly: 'Montaje: arme cada cara sobre la mesa y luego encaje las caras entre sí — los dientes de borde de las caras vecinas se enganchan y sostienen el cubo sin pegamento. Cada esquina del cubo pertenece a una de las tres piezas que se juntan en ella.',
+    rm_assembly: 'Montaje: arme cada cara sobre la mesa y luego encaje las caras entre sí — los dientes de borde de las caras vecinas se enganchan y sostienen el cubo sin pegamento. Cada esquina del cubo pertenece a una de las tres piezas que se juntan en ella. Las piezas se encajan presionando desde arriba: los dientes de cola de milano las bloquean en el plano.',
   },
 };
 
