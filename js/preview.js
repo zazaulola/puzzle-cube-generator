@@ -108,11 +108,24 @@ function drawPlate(canvas, plate, thickness, palette, colorsCount, maxCss) {
   for (const pc of plate.pieces) {
     const col = colorsCount === 4 ? palette[pc.piece.color] : palette[0];
     ctx.fillStyle = col;
-    tracePoly(ctx, pc.poly, s, s, ox, oy);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
+    if (pc.poly2) {
+      // tilted piece: lower ring dimmed, upper ring on top
+      ctx.globalAlpha = 0.45;
+      tracePoly(ctx, pc.poly, s, s, ox, oy);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      tracePoly(ctx, pc.poly2, s, s, ox, oy);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    } else {
+      tracePoly(ctx, pc.poly, s, s, ox, oy);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
   }
   return cssH;
 }

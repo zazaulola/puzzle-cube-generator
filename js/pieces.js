@@ -18,11 +18,11 @@
 
 const CELL = 8; // cells per tile (an 8×8 tile → two 8×4 elements)
 
-/* Dovetail flare, in cell units per side. Rectangular teeth have no
-   undercut and hold nothing; flaring every tooth tip outward and its
-   base inward turns each tooth into a dovetail, so pieces press in
-   from above and lock in-plane like a real jigsaw. */
-const DOVETAIL = 0.15;
+/* Dovetail flare, in cell units per side. 0 = plain straight pixel
+   teeth (uniform look, friction fit — tune with slicer XY compensation).
+   Values around 0.15 turn every tooth into a locking dovetail, but the
+   flared in-face seams then look different from the cube-edge joints. */
+const DOVETAIL = 0;
 
 function pieceCount(d) { return 12 * d * d; }
 
@@ -59,6 +59,7 @@ function buildPuzzle(params) {
      Vertices next to the face rim, foreign voxels or 3-piece junctions
      are left in place (the 3D edge joints must stay straight). */
   const dovetail = (fi, x, y) => {
+    if (!DOVETAIL) return [x, y];
     const quads = [[x - 1, y - 1], [x, y - 1], [x - 1, y], [x, y]];
     const owners = quads.map(q => cellAt(fi, q[0], q[1]));
     if (owners.includes(-1)) return [x, y];

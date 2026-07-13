@@ -95,7 +95,19 @@ function buildSTL(coords) {
 // STL for a single plate
 function plateSTL(plate, thickness) {
   const coords = [];
-  for (const pc of plate.pieces) extrudePiece(pc.poly, thickness, coords);
+  for (const pc of plate.pieces) {
+    if (pc.tilt) {
+      // tilted piece: extrude flat, then rotate 45°×45° and drop onto the bed
+      const local = [];
+      extrudePiece(pc.tilt.src, thickness, local);
+      for (let k = 0; k < local.length; k += 3) {
+        const v = tilt45(local[k], local[k + 1], local[k + 2]);
+        coords.push(v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - pc.tilt.zmin);
+      }
+    } else {
+      extrudePiece(pc.poly, thickness, coords);
+    }
+  }
   return buildSTL(coords);
 }
 

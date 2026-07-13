@@ -9,7 +9,7 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 ## The puzzle
 
 - The cube is a hollow box of six flat plates; each face is an `d×d` grid of 8×8-cell tiles, and every tile is cut into two **8×4 elements**, with cut orientations alternating in a checkerboard that stays consistent across the cube edges.
-- Borders between neighboring elements wander randomly by **−1/0/+1 cells**, so every piece gets a unique pixelated outline (verified against all rotations and reflections — duplicates are regenerated). Every tooth is flared into a small **dovetail** (wider at the tip), so pieces press in flat from above and lock together in the plane of the face — straight rectangular teeth would have no undercut and would not hold.
+- Borders between neighboring elements wander randomly by **−1/0/+1 cells**, so every piece gets a unique pixelated outline (verified against all rotations and reflections — duplicates are regenerated). All teeth are straight, so every joint — in-face or across a cube edge — looks identical; pieces hold by friction (tune the fit with your slicer's XY compensation).
 - Along the cube edges each rim cell goes to exactly one of the two meeting faces (**−1/+1**, never flush), forming a random box joint; the plate thickness equals the cell size, so joints are flush and the assembled cube reads as a seamless voxel lattice. Each cube corner cell belongs to one of the three pieces meeting at that corner.
 - The faces are assembled flat on the table, then slid together; the edge teeth interlock and hold the cube without glue.
 
@@ -28,7 +28,8 @@ The piece thickness always equals the puzzle cell (`edge / 8d`), which is what m
 
 ## Printing
 
-- Pieces lie flat, **no supports needed**; 3–4 perimeters, 15–25% infill.
+- Pieces lie flat by default, **no supports needed**; 3–4 perimeters, 15–25% infill.
+- Optional **45°×45° tilted export**: every piece is rotated 45° about X and Y, so both sides print with the same finish and edges come out symmetric (no elephant-foot bias on one face). Supports are required in this mode.
 - One STL per plate per color — print each file in its filament color (AMS/MMU friendly; layouts target a 256×256 mm plate).
 - If the fit is too tight or too loose, tune your slicer's XY hole/contour compensation.
 

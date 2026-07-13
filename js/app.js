@@ -11,6 +11,7 @@ const state = {
   autoEdge: true,   // pick the largest cube edge that fits the plates
   baseEdge: 80,     // cube edge at 1x (manual mode), mm
   maxCell: 4,       // cap on the cell size in auto mode, mm (print time!)
+  orient: 'flat',   // print orientation: 'flat' | 'tilt' (45°×45°, supports)
   clearance: 0,     // clearance per side, mm (fixed; tune fit in the slicer)
   bedW: 256,        // print plate size, mm (fixed)
   bedH: 256,
@@ -51,6 +52,7 @@ function layoutFor(m) {
     bedW: state.bedW,
     bedH: state.bedH,
     clearance: state.clearance,
+    tilt: state.orient === 'tilt',
   });
 }
 
@@ -207,7 +209,7 @@ ${t('rm_cell')}: ${model.c.toFixed(2)} ${t('mm')} · ${t('rm_element')}
 Seed: ${state.seed}
 ${t('rm_unique')}: ${model.unique ? t('yes') : t('no')}
 
-${t('rm_print')}
+${state.orient === 'tilt' ? t('rm_tilt') : t('rm_print')}
 ${t('rm_assembly')}
 `;
   files.push({ name: 'README.txt', data: new TextEncoder().encode(readme) });
@@ -256,6 +258,7 @@ function init() {
   bindSegmented('#seg-difficulty', 'difficulty');
   bindSegmented('#seg-colors', 'colors');
   bindSegmented('#seg-scale', 'scale');
+  bindSegmented('#seg-orient', 'orient', String);
   bindNumber('#inp-edge', 'baseEdge', 24, 400);
   const chkAuto = $('#chk-auto');
   chkAuto.checked = state.autoEdge;

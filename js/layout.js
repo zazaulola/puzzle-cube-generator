@@ -51,6 +51,14 @@ function polyBBox(poly) {
   return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
 }
 
+// Tilted print orientation: rotate 45° about X, then 45° about Y.
+// Both piece sides then print with the same (layered) finish.
+const TILT_S = Math.SQRT1_2;
+function tilt45(x, y, z) {
+  const y1 = (y - z) * TILT_S, z1 = (y + z) * TILT_S; // Rx(45°)
+  return [(x + z1) * TILT_S, y1, (z1 - x) * TILT_S];  // Ry(45°)
+}
+
 /* Plate layout. Pieces are grouped by color (when 4 colors are used) and
    each group is split across plateCount plates (the scale). Overflow goes
    to extra plates flagged as overflow.
@@ -70,12 +78,22 @@ function layoutPlates(model, opts) {
   const plates = [];
   let overflowCount = 0;
 
+  const tilt = !!opts.tilt;
   for (const g of groups) {
     // preparation: offset + bbox, stable order (by faces/cells)
     const items = g.pieces.map(p => {
       const poly = offsetPolygon(p.poly, clearance);
-      const bb = polyBBox(poly);
-      return { piece: p, poly, bb };
+      if (!tilt) return { piece: p, poly, bb: polyBBox(poly) };
+      // footprint of the tilted piece: both outline rings transformed
+      const r0 = poly.map(q => tilt45(q[0], q[1], 0));
+      const r1 = poly.map(q => tilt45(q[0], q[1], model.t));
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, zmin = Infinity;
+      for (const v of r0.concat(r1)) {
+        if (v[0] < x0) x0 = v[0]; if (v[0] > x1) x1 = v[0];
+        if (v[1] < y0) y0 = v[1]; if (v[1] > y1) y1 = v[1];
+        if (v[2] < zmin) zmin = v[2];
+      }
+      return { piece: p, poly, r0, r1, zmin, bb: { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 } };
     });
     // split into plateCount roughly equal chunks, preserving order
     const per = Math.ceil(items.length / plateCount);
@@ -99,6 +117,21 @@ function layoutPlates(model, opts) {
   return { plates, overflowCount, misfit };
 }
 
+// A packed entry: flat pieces carry the translated outline; tilted ones
+// carry both transformed rings (for preview) plus the source outline and
+// offsets for STL generation.
+function placeItem(it, dx, dy) {
+  if (!it.r0) {
+    return { piece: it.piece, poly: it.poly.map(p => [p[0] + dx, p[1] + dy]) };
+  }
+  return {
+    piece: it.piece,
+    poly: it.r0.map(v => [v[0] + dx, v[1] + dy]),
+    poly2: it.r1.map(v => [v[0] + dx, v[1] + dy]),
+    tilt: { src: it.poly, dx, dy, zmin: it.zmin },
+  };
+}
+
 // Shelf packing; returns whatever did not fit
 function packOnePlate(plates, color, index, items, bedW, bedH, margin, gap, overflow) {
   const sorted = [...items].sort((a, b) => b.bb.h - a.bb.h);
@@ -112,17 +145,13 @@ function packOnePlate(plates, color, index, items, bedW, bedH, margin, gap, over
     if (px + w > bedW - margin) { px = margin; py = cy + rowH + gap; wrapped = true; }
     if (py + h > bedH - margin) { rest.push(it); continue; }
     if (wrapped) { cy = py; rowH = 0; }
-    const dx = px - it.bb.x0, dy = py - it.bb.y0;
-    placed.push({
-      piece: it.piece,
-      poly: it.poly.map(p => [p[0] + dx, p[1] + dy]),
-    });
+    placed.push(placeItem(it, px - it.bb.x0, py - it.bb.y0));
     cx = px + w + gap; rowH = Math.max(rowH, h);
   }
   if (placed.length) plates.push({ color, index, pieces: placed, bedW, bedH, overflow });
   else if (items.length) {
     // nothing fits — place by force so the loop cannot spin forever
-    plates.push({ color, index, pieces: items.map(it => ({ piece: it.piece, poly: it.poly })), bedW, bedH, overflow: true, tooBig: true });
+    plates.push({ color, index, pieces: items.map(it => placeItem(it, 0, 0)), bedW, bedH, overflow: true, tooBig: true });
     return [];
   }
   return rest;
