@@ -10,7 +10,8 @@ const state = {
   scale: 1,
   autoEdge: true,   // pick the largest cube edge that fits the plates
   baseEdge: 80,     // cube edge at 1x (manual mode), mm
-  clearance: 0.1,   // clearance per side, mm
+  maxCell: 4,       // cap on the cell size in auto mode, mm (print time!)
+  clearance: 0,     // clearance per side, mm
   bedW: 256,
   bedH: 256,
   seed: 'cube-001',
@@ -53,7 +54,8 @@ function layoutFor(m) {
   });
 }
 
-// Largest cube edge at which everything fits the planned number of plates.
+// Largest cube edge at which everything fits the planned number of plates,
+// with the cell capped at state.maxCell (bigger cells print much longer).
 // The edge is quantized so that the cell (= thickness) is a multiple of 0.25 mm.
 function findMaxEdge(base) {
   const N = base.N;
@@ -62,13 +64,15 @@ function findMaxEdge(base) {
     const res = layoutFor(scaledModel(base, L));
     return res.overflowCount === 0 && !res.misfit;
   };
-  let lo = 24, hi = 480;
+  const cap = Math.max(24, quant(state.maxCell * N)); // cell ≤ maxCell
+  let lo = 24, hi = Math.max(24, Math.min(480, cap));
   if (!fits(lo)) return lo;
+  if (fits(hi)) return hi;
   while (hi - lo > 1) {
     const mid = Math.round((lo + hi) / 2);
     if (fits(mid)) lo = mid; else hi = mid;
   }
-  return Math.max(24, quant(lo));
+  return Math.max(24, Math.min(cap, quant(lo)));
 }
 
 function regenerate() {
@@ -87,7 +91,6 @@ function regenerate() {
   const edgeInp = $('#inp-edge');
   edgeInp.disabled = state.autoEdge;
   if (state.autoEdge) edgeInp.value = L;
-  $('#inp-thickness').value = model.c.toFixed(2);
   renderAll();
 }
 
@@ -262,7 +265,7 @@ function init() {
     }
     regenerate();
   });
-  $('#inp-thickness').disabled = true; // thickness = cell, computed
+  bindNumber('#inp-maxcell', 'maxCell', 1, 30);
   bindNumber('#inp-clearance', 'clearance', 0, 0.5);
   bindNumber('#inp-bedw', 'bedW', 100, 600);
   bindNumber('#inp-bedh', 'bedH', 100, 600);

@@ -21,7 +21,8 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 | Colors | 1 or 4 | with 4 colors, adjacent pieces (including across cube edges) always differ — an exact 4-coloring of the adjacency graph |
 | Scale | 1×/2×/3× | build plates per color; more plates → bigger pieces |
 | Cube edge | auto or manual | auto mode binary-searches the largest cube that fits the planned plates |
-| Clearance | mm per side | uniform inward offset for a comfortable fit |
+| Max cell | mm, default 4 | caps the piece size in auto mode — the cell equals the piece thickness, and bigger cells print much longer |
+| Clearance | mm per side, default 0 | uniform inward offset for a looser fit |
 | Seed | text | deterministic: the same seed always yields the same cutting |
 
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.
