@@ -140,7 +140,10 @@ function plateFileName(pl) {
 function renderPlates() {
   const wrap = $('#plates-grid');
   wrap.innerHTML = '';
-  const cardW = Math.max(220, Math.min(300, (wrap.getBoundingClientRect().width - 40) / Math.min(plates.length, 3)));
+  // as many cards per row as fit at ~260px each; the canvas fills the card
+  const wrapW = wrap.getBoundingClientRect().width || 320;
+  const perRow = Math.max(1, Math.min(plates.length, Math.floor(wrapW / 260)));
+  const cardW = Math.max(200, Math.min(420, (wrapW - perRow * 20) / perRow));
   plates.forEach(pl => {
     const card = document.createElement('div');
     card.className = 'plate-card';
@@ -296,7 +299,12 @@ function init() {
     });
   });
 
-  window.addEventListener('resize', () => renderAll());
+  // debounced: mobile browsers fire resize on address-bar show/hide
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (model) renderAll(); }, 150);
+  });
   regenerate();
 }
 

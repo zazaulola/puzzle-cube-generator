@@ -205,3 +205,32 @@ body {
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Mobile / narrow screens ---------- */
+@media (max-width: 860px) {
+  body { flex-direction: column; overflow: auto; height: auto; min-height: 100%; }
+  /* preview first, controls below */
+  .stage { order: -1; height: auto; overflow: visible; }
+  .panel {
+    width: 100%; min-width: 0; height: auto; overflow: visible;
+    border-right: none; border-top: 1px solid var(--line);
+    padding: 18px 14px 22px;
+  }
+  .statbar { position: static; flex-wrap: wrap; backdrop-filter: none; }
+  .stat { flex: 1 1 auto; padding: 8px 10px 6px; }
+  .stat b { font-size: 13px; }
+  .stat span { font-size: 8px; }
+  .tabs { margin-left: 0; width: 100%; padding: 8px 10px 10px; }
+  .tab { flex: 1; padding: 10px 0; }
+  .view { padding: 14px 10px 22px; }
+  #plates-grid { justify-content: center; }
+  .plate-card { flex: 1 1 300px; max-width: 420px; }
+  /* touch targets */
+  .seg button { padding: 10px 4px 9px; }
+  .pickers input[type="color"] { height: 34px; }
+  .num { padding: 10px 9px; font-size: 14px; }
+  .seed-row button { width: 42px; }
+  .dl-btn { padding: 7px 12px; }
+  .zip-btn { padding: 14px; }
+  .colophon { text-align: center; }
+}
