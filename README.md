@@ -22,7 +22,6 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 | Scale | 1×/2×/3× | build plates per color; more plates → bigger pieces |
 | Cube edge | auto or manual | auto mode binary-searches the largest cube that fits the planned plates |
 | Max cell | mm, default 4 | caps the piece size in auto mode — the cell equals the piece thickness, and bigger cells print much longer |
-| Clearance | mm per side, default 0 | uniform inward offset for a looser fit |
 | Seed | text | deterministic: the same seed always yields the same cutting |
 
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.
@@ -30,8 +29,8 @@ The piece thickness always equals the puzzle cell (`edge / 8d`), which is what m
 ## Printing
 
 - Pieces lie flat, **no supports needed**; 3–4 perimeters, 15–25% infill.
-- One STL per plate per color — print each file in its filament color (AMS/MMU friendly, default plate is 256×256 mm, configurable).
-- If the fit is too tight or too loose, tune the clearance parameter or your slicer's XY hole/contour compensation.
+- One STL per plate per color — print each file in its filament color (AMS/MMU friendly; layouts target a 256×256 mm plate).
+- If the fit is too tight or too loose, tune your slicer's XY hole/contour compensation.
 
 ## Running locally
 

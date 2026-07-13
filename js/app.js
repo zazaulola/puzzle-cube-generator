@@ -11,8 +11,8 @@ const state = {
   autoEdge: true,   // pick the largest cube edge that fits the plates
   baseEdge: 80,     // cube edge at 1x (manual mode), mm
   maxCell: 4,       // cap on the cell size in auto mode, mm (print time!)
-  clearance: 0,     // clearance per side, mm
-  bedW: 256,
+  clearance: 0,     // clearance per side, mm (fixed; tune fit in the slicer)
+  bedW: 256,        // print plate size, mm (fixed)
   bedH: 256,
   seed: 'cube-001',
   palette: ['#e8543f', '#f4b942', '#3e9e6e', '#3d7dd8'],
@@ -201,7 +201,7 @@ ${t('difficulty')}: ${state.difficulty} (${model.pieces.length} ${t('stPieces')}
 ${t('colors')}: ${state.colors}
 ${t('scale')}: ${state.scale}x · ${t('stEdge')}: ${model.L} ${t('mm')}
 ${t('rm_cell')}: ${model.c.toFixed(2)} ${t('mm')} · ${t('rm_element')}
-${t('clearance')}: ${state.clearance} · seed: ${state.seed}
+Seed: ${state.seed}
 ${t('rm_unique')}: ${model.unique ? t('yes') : t('no')}
 
 ${t('rm_print')}
@@ -266,9 +266,6 @@ function init() {
     regenerate();
   });
   bindNumber('#inp-maxcell', 'maxCell', 1, 30);
-  bindNumber('#inp-clearance', 'clearance', 0, 0.5);
-  bindNumber('#inp-bedw', 'bedW', 100, 600);
-  bindNumber('#inp-bedh', 'bedH', 100, 600);
 
   const seedInp = $('#inp-seed');
   seedInp.value = state.seed;
