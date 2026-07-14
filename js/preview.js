@@ -55,6 +55,35 @@ function drawNet(canvas, model, palette, colorsCount) {
       ctx.stroke();
     }
   }
+  // hidden hemisphere fixators: dot = bump, ring = socket (drawn at the
+  // wall midpoints; a shared wall shows the pair as a dot inside a ring)
+  const rDot = Math.max(1.2, FIX_R * model.c * s * 0.9);
+  ctx.lineWidth = 1;
+  for (const f of model.faces) {
+    const [gx, gy] = NET_LAYOUT[f.name];
+    const ox = pad + gx * cell + 3;
+    const oy = pad + (2 - gy) * cell + 3 + model.L * s;
+    for (const p of f.pieces) {
+      if (!p.feats || !p.outline) continue;
+      const nOut = p.outline.length;
+      for (const [k, type] of p.feats) {
+        const P0 = p.outline[k], P1 = p.outline[(k + 1) % nOut];
+        const mx = ((P0[0] + P1[0]) / 2) * model.c, my = ((P0[1] + P1[1]) / 2) * model.c;
+        const px = ox + mx * s, py = oy - my * s;
+        ctx.beginPath();
+        if (type === 'bump') {
+          ctx.fillStyle = 'rgba(12,16,20,0.65)';
+          ctx.arc(px, py, rDot * 0.55, 0, 2 * Math.PI);
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = 'rgba(12,16,20,0.65)';
+          ctx.arc(px, py, rDot, 0, 2 * Math.PI);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
   ctx.fillStyle = ink;
   ctx.font = '10px "IBM Plex Mono", monospace';
   ctx.textAlign = 'center';

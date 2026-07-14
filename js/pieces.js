@@ -212,14 +212,36 @@ function tryBuild(d, N, rng, force) {
 
   for (const e of matchCubeEdges()) {
     const fa = faceIdx[e.a.face], fb = faceIdx[e.b.face];
-    for (let k = 1; k <= N - 2; k++) { // corner cells are handled separately
+    // Candidates per position (corner cells are handled separately).
+    const pos = [];
+    for (let k = 1; k <= N - 2; k++) {
       const pa = sidePixel(e.a.side, k, N);
       const pb = sidePixel(e.b.side, e.flip ? N - 1 - k : k, N);
       const ka = key(fa, pa[0], pa[1]), kb = key(fb, pb[0], pb[1]);
       aliasOf.set(kb, ka); aliasOf.set(ka, ka);
       groups.set(ka, [ka, kb]);
-      const va = own[fa][pa[1] * N + pa[0]], vb = own[fb][pb[1] * N + pb[0]];
-      vox.set(ka, rng() < 0.5 ? va : vb); // −1/+1: the cell goes to one of the two faces
+      pos.push({ ka, va: own[fa][pa[1] * N + pa[0]], vb: own[fb][pb[1] * N + pb[0]] });
+    }
+    /* −1/+1 tooth lottery, windowed: within a maximal run where the two
+       candidate pieces stay the same, a constant sequence would hand the
+       whole contact to one side — the pair would then touch only via cap
+       faces, with no shared side wall and no fixator. Windows of length
+       ≥2 are forced to be non-constant, so every such pair gets at least
+       one lateral fixator wall across the cube edge. */
+    let s = 0;
+    while (s < pos.length) {
+      let epos = s + 1;
+      while (epos < pos.length && pos[epos].va === pos[s].va && pos[epos].vb === pos[s].vb) epos++;
+      const len = epos - s;
+      let seq, guard = 0;
+      do {
+        seq = [];
+        for (let q = 0; q < len; q++) seq.push(rng() < 0.5);
+        guard++;
+      } while (len >= 2 && guard < 20 && seq.every(x => x === seq[0]));
+      if (len >= 2 && seq.every(x => x === seq[0])) seq[0] = !seq[0];
+      for (let q = 0; q < len; q++) vox.set(pos[s + q].ka, seq[q] ? pos[s + q].va : pos[s + q].vb);
+      s = epos;
     }
   }
   for (const group of matchCubeCorners()) {
