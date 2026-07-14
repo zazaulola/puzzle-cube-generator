@@ -132,9 +132,8 @@ function placeItem(it, dx, dy) {
   };
 }
 
-// Shelf packing; returns whatever did not fit
-function packOnePlate(plates, color, index, items, bedW, bedH, margin, gap, overflow) {
-  const sorted = [...items].sort((a, b) => b.bb.h - a.bb.h);
+// Shelf packing with a row-width limit (compact square-ish cluster)
+function shelfPack(sorted, rowW, bedW, bedH, margin, gap) {
   const placed = [], rest = [];
   let cx = margin, cy = margin, rowH = 0;
   for (const it of sorted) {
@@ -142,17 +141,38 @@ function packOnePlate(plates, color, index, items, bedW, bedH, margin, gap, over
     if (w > bedW - 2 * margin) { rest.push(it); continue; }
     // tentative placement — the cursor moves only on success
     let px = cx, py = cy, wrapped = false;
-    if (px + w > bedW - margin) { px = margin; py = cy + rowH + gap; wrapped = true; }
+    if (px + w > margin + rowW && px > margin) { px = margin; py = cy + rowH + gap; wrapped = true; }
     if (py + h > bedH - margin) { rest.push(it); continue; }
     if (wrapped) { cy = py; rowH = 0; }
     placed.push(placeItem(it, px - it.bb.x0, py - it.bb.y0));
     cx = px + w + gap; rowH = Math.max(rowH, h);
   }
-  if (placed.length) plates.push({ color, index, pieces: placed, bedW, bedH, overflow });
+  return { placed, rest };
+}
+
+// Packs one plate as a compact cluster: rows are wrapped near the square
+// root of the total area instead of spanning the whole bed, widening only
+// if the cluster does not fit. Returns whatever did not fit.
+function packOnePlate(plates, color, index, items, bedW, bedH, margin, gap, overflow) {
+  const sorted = [...items].sort((a, b) => b.bb.h - a.bb.h);
+  const full = bedW - 2 * margin;
+  let area = 0, maxW = 0;
+  for (const it of items) {
+    area += (it.bb.w + gap) * (it.bb.h + gap);
+    maxW = Math.max(maxW, it.bb.w);
+  }
+  const target = Math.max(maxW, Math.sqrt(area) * 1.12);
+  let att = null;
+  for (const w of [target, target * 1.35, target * 1.8, full]) {
+    const rowW = Math.min(full, w);
+    att = shelfPack(sorted, rowW, bedW, bedH, margin, gap);
+    if (!att.rest.length || rowW >= full) break;
+  }
+  if (att.placed.length) plates.push({ color, index, pieces: att.placed, bedW, bedH, overflow });
   else if (items.length) {
     // nothing fits — place by force so the loop cannot spin forever
     plates.push({ color, index, pieces: items.map(it => placeItem(it, 0, 0)), bedW, bedH, overflow: true, tooBig: true });
     return [];
   }
-  return rest;
+  return att.rest;
 }

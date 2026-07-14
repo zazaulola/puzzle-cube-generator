@@ -24,6 +24,14 @@ const CELL = 8; // cells per tile (an 8×8 tile → two 8×4 elements)
    flared in-face seams then look different from the cube-edge joints. */
 const DOVETAIL = 0;
 
+/* Snap fixator: a semicircular ridge on one piece clicks into a matching
+   groove on its neighbor (one per adjacent pair, ridge side chosen
+   randomly but deterministically by seed). The mouth is narrower than
+   the ridge diameter, so mated pieces snap and resist pulling apart.
+   All values in cell units. */
+const SNAP_R = 0.27; // ridge radius
+const SNAP_M = 0.22; // half-width of the mouth (undercut = R − M per side)
+
 function pieceCount(d) { return 12 * d * d; }
 
 function buildPuzzle(params) {
@@ -72,17 +80,58 @@ function buildPuzzle(params) {
     return [x - qx * DOVETAIL, y - qy * DOVETAIL];
   };
 
+  /* Fixator arc for a wall (canonical: from the lexicographically smaller
+     endpoint to the larger). Both mating pieces read the same cached point
+     list, so ridge and groove stay exactly complementary. */
+  const arcCache = new Map();
+  const arcPoints = (key, conn) => {
+    if (arcCache.has(key)) return arcCache.get(key);
+    const mx = (conn.x0 + conn.x1) / 2, my = (conn.y0 + conn.y1) / 2;
+    const ux = conn.x1 - conn.x0, uy = conn.y1 - conn.y0; // unit wall direction
+    const D = Math.sqrt(SNAP_R * SNAP_R - SNAP_M * SNAP_M);
+    const cx = mx + conn.n[0] * D, cy = my + conn.n[1] * D;
+    const A1 = [mx - ux * SNAP_M, my - uy * SNAP_M];
+    const A2 = [mx + ux * SNAP_M, my + uy * SNAP_M];
+    const f1 = Math.atan2(A1[1] - cy, A1[0] - cx);
+    let dShort = Math.atan2(A2[1] - cy, A2[0] - cx) - f1;
+    while (dShort > Math.PI) dShort -= 2 * Math.PI;
+    while (dShort < -Math.PI) dShort += 2 * Math.PI;
+    const sweep = dShort - Math.sign(dShort) * 2 * Math.PI; // major arc — through the bulge
+    const pts = [A1];
+    const K = 12;
+    for (let k = 1; k <= K; k++) {
+      const th = f1 + sweep * k / (K + 1);
+      pts.push([cx + SNAP_R * Math.cos(th), cy + SNAP_R * Math.sin(th)]);
+    }
+    pts.push(A2);
+    arcCache.set(key, pts);
+    return pts;
+  };
+  const lessPt = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+
   const faces = FACE_DEFS.map(fd => ({ name: fd.name, pieces: [] }));
   const byName = Object.fromEntries(faces.map(f => [f.name, f]));
   const pieces = [];
   for (const el of built.elements) {
     const fi = faceIdx[el.face];
+    const unitPoly = [];
+    const n = el.outline.length;
+    for (let k = 0; k < n; k++) {
+      const P0 = el.outline[k], P1 = el.outline[(k + 1) % n];
+      unitPoly.push(dovetail(fi, P0[0], P0[1]));
+      const fwd = lessPt(P0, P1);
+      const [G0, G1] = fwd ? [P0, P1] : [P1, P0];
+      const wk = fi + '|' + G0[0] + ',' + G0[1] + '|' + G1[0] + ',' + G1[1];
+      const conn = built.connectors && built.connectors.get(wk);
+      if (conn) {
+        const pts = arcPoints(wk, conn);
+        if (fwd) unitPoly.push(...pts);
+        else for (let q = pts.length - 1; q >= 0; q--) unitPoly.push(pts[q]);
+      }
+    }
     const piece = {
       id: el.id, face: el.face, color: 0,
-      poly: mergeCollinear(el.outline.map(p => {
-        const [x, y] = dovetail(fi, p[0], p[1]);
-        return [x * c, y * c];
-      })),
+      poly: mergeCollinear(unitPoly.map(p => [p[0] * c, p[1] * c])),
       cellCount: el.cells.length,
     };
     byName[el.face].pieces.push(piece);
@@ -143,6 +192,43 @@ function tryBuild(d, N, rng, force) {
         const r = rng();
         if (r < 1 / 3) m[j * N + i] = a;            // left element bites right
         else if (r < 2 / 3) m[j * N + (i - 1)] = b; // right element bites left
+      }
+    }
+  }
+
+  // Guarantee at least one ±1 step on every nominal pair border — a
+  // perfectly flat border would leave the two pieces unconnected.
+  for (let fi = 0; fi < NF; fi++) {
+    const m = own[fi];
+    const borders = new Map(); // pairKey → { pos: [[i,j,vert]], step }
+    const record = (a, b, i, j, vert, devA, devB) => {
+      const k = a < b ? a + '|' + b : b + '|' + a;
+      if (!borders.has(k)) borders.set(k, { pos: [], step: false });
+      const e = borders.get(k);
+      e.pos.push([i, j, vert]);
+      if (devA || devB) e.step = true;
+    };
+    for (let j = 0; j < N; j++) {
+      for (let i = 1; i < N; i++) {
+        const a = nom(fi, i - 1, j), b = nom(fi, i, j);
+        if (a !== b) record(a, b, i, j, 1, m[j * N + (i - 1)] !== a, m[j * N + i] !== b);
+      }
+    }
+    for (let j = 1; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const a = nom(fi, i, j - 1), b = nom(fi, i, j);
+        if (a !== b) record(a, b, i, j, 0, m[(j - 1) * N + i] !== a, m[j * N + i] !== b);
+      }
+    }
+    for (const [, e] of borders) {
+      if (e.step) continue;
+      const [i, j, vert] = e.pos[(rng() * e.pos.length) | 0];
+      if (vert) {
+        if (rng() < 0.5) m[j * N + i] = nom(fi, i - 1, j);
+        else m[j * N + (i - 1)] = nom(fi, i, j);
+      } else {
+        if (rng() < 0.5) m[j * N + i] = nom(fi, i, j - 1);
+        else m[(j - 1) * N + i] = nom(fi, i, j);
       }
     }
   }
@@ -317,20 +403,72 @@ function tryBuild(d, N, rng, force) {
   };
 
   // Alternate pinch repair and stitching until stable
-  let stable = false;
-  for (let round = 0; round < 40 && !stable; round++) {
-    let guard = 0;
-    while (guard++ < 600) {
-      const pn = findPinch();
-      if (!pn) break;
-      if (!repairPinch(pn)) return null;
+  const runRepairs = () => {
+    let stable = false;
+    for (let round = 0; round < 40 && !stable; round++) {
+      let guard = 0;
+      while (guard++ < 600) {
+        const pn = findPinch();
+        if (!pn) break;
+        if (!repairPinch(pn)) return false;
+      }
+      if (findPinch()) return false;
+      const st = stitchFragments();
+      if (st === null) return false;
+      stable = !st.changed;
     }
-    if (findPinch()) return null;
-    const st = stitchFragments();
-    if (st === null) return null;
-    stable = !st.changed;
+    return stable;
+  };
+  if (!runRepairs()) return null;
+
+  // Shared walls of every adjacent in-face pair (by current ownership)
+  const wallCellPair = w => w.vert
+    ? [[w.x0 - 1, w.y0], [w.x0, w.y0]]
+    : [[w.x0, w.y0 - 1], [w.x0, w.y0]];
+  const collectPairWalls = () => {
+    const map = new Map();
+    for (let fi = 0; fi < NF; fi++) {
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          const p = owner(fi, i, j);
+          const add = (q, wall) => {
+            if (p === q || elemFace(p) !== fi || elemFace(q) !== fi) return;
+            const k = Math.min(p, q) + '|' + Math.max(p, q);
+            if (!map.has(k)) map.set(k, []);
+            map.get(k).push(wall);
+          };
+          if (i + 1 < N) add(owner(fi, i + 1, j), { fi, x0: i + 1, y0: j, x1: i + 1, y1: j + 1, vert: 1, lo: p, hi: owner(fi, i + 1, j) });
+          if (j + 1 < N) add(owner(fi, i, j + 1), { fi, x0: i, y0: j + 1, x1: i + 1, y1: j + 1, vert: 0, lo: p, hi: owner(fi, i, j + 1) });
+        }
+      }
+    }
+    return map;
+  };
+  const isFlatContact = walls => walls.every(w => w.vert === walls[0].vert &&
+    (w.vert ? w.x0 === walls[0].x0 : w.y0 === walls[0].y0));
+
+  // Wiggle long perfectly straight contacts: force one ±1 steal across
+  // the border, then repair again. The snap fixator would hold a flat
+  // pair anyway, but the shapes should interlock too.
+  for (let cycle = 0; cycle < 5; cycle++) {
+    const pw = collectPairWalls();
+    let changed = false;
+    for (const k of [...pw.keys()].sort()) {
+      const walls = pw.get(k);
+      if (walls.length < 3 || !isFlatContact(walls)) continue;
+      const w = walls[(walls.length / 2) | 0];
+      const [cLo, cHi] = wallCellPair(w);
+      const kLo = key(w.fi, cLo[0], cLo[1]), kHi = key(w.fi, cHi[0], cHi[1]);
+      const steals = rng() < 0.5
+        ? [[kHi, w.lo], [kLo, w.hi]]
+        : [[kLo, w.hi], [kHi, w.lo]];
+      for (const [ck, newOwner] of steals) {
+        if (legal(ck).has(newOwner)) { setOwner(ck, newOwner); changed = true; break; }
+      }
+    }
+    if (!changed) break;
+    if (!runRepairs()) return null;
   }
-  if (!stable) return null;
 
   const cellsOf = collectCells();
 
@@ -347,6 +485,57 @@ function tryBuild(d, N, rng, force) {
     const s = canonicalSig(cells);
     if (sigs.has(s)) { unique = false; if (!force) return null; }
     sigs.add(s);
+  }
+
+  // ---- Snap fixators ----
+  // Every adjacent in-face pair gets one connector: a ridge on a random
+  // (seed-deterministic) side and a matching groove on the other.
+  const pairWalls = collectPairWalls();
+  const connectors = new Map(); // 'fi|x0,y0|x1,y1' → { x0,y0,x1,y1, n: [nx,ny] }
+  // Arcs on perpendicular walls of one cell can cross near the shared
+  // corner — a placed connector blocks the perpendicular walls of both
+  // adjacent cells.
+  const blocked = new Set(); // 'fi|vert|i,j' — cell blocked for walls of this orientation
+  const isBlocked = w => wallCellPair(w).some(cc => blocked.has(w.fi + '|' + w.vert + '|' + cc[0] + ',' + cc[1]));
+  const blockAround = w => {
+    for (const cc of wallCellPair(w)) blocked.add(w.fi + '|' + (1 - w.vert) + '|' + cc[0] + ',' + cc[1]);
+  };
+  for (const pk of [...pairWalls.keys()].sort()) {
+    const walls = pairWalls.get(pk);
+    // longest straight run of consecutive unblocked walls
+    let best = null;
+    const groupsRun = new Map();
+    for (const w of walls) {
+      if (isBlocked(w)) continue;
+      const gk = w.fi + '|' + w.vert + '|' + (w.vert ? w.x0 : w.y0);
+      if (!groupsRun.has(gk)) groupsRun.set(gk, []);
+      groupsRun.get(gk).push(w);
+    }
+    for (const [, ws] of groupsRun) {
+      ws.sort((a, b) => (a.vert ? a.y0 - b.y0 : a.x0 - b.x0));
+      let run = [ws[0]];
+      const flush = () => {
+        if (!best || run.length > best.length) best = run;
+        run = [];
+      };
+      for (let k = 1; k < ws.length; k++) {
+        const prev = run[run.length - 1];
+        const contig = ws[k].vert ? ws[k].y0 === prev.y0 + 1 : ws[k].x0 === prev.x0 + 1;
+        if (contig) run.push(ws[k]); else { flush(); run = [ws[k]]; }
+      }
+      flush();
+    }
+    if (!best) continue; // all walls blocked — rare; the pair still interlocks by shape
+    const w = best[(best.length / 2) | 0];
+    const [pa, pb] = pk.split('|').map(Number);
+    const ridge = rng() < 0.5 ? pa : pb;
+    // normal points from the ridge piece into the groove piece
+    const n = w.vert
+      ? (ridge === w.lo ? [1, 0] : [-1, 0])
+      : (ridge === w.lo ? [0, 1] : [0, -1]);
+    blockAround(w);
+    connectors.set(w.fi + '|' + w.x0 + ',' + w.y0 + '|' + w.x1 + ',' + w.y1,
+      { x0: w.x0, y0: w.y0, x1: w.x1, y1: w.y1, n });
   }
 
   // ---- Outlines and adjacency ----
@@ -381,7 +570,7 @@ function tryBuild(d, N, rng, force) {
       }
     }
   }
-  return { elements, adjacency: adj.map(s => [...s]), unique };
+  return { elements, adjacency: adj.map(s => [...s]), unique, connectors };
 }
 
 // ---------- Connected components (4-neighborhood) ----------

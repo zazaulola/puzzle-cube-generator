@@ -12,7 +12,9 @@ const state = {
   baseEdge: 80,     // cube edge at 1x (manual mode), mm
   maxCell: 4,       // cap on the cell size in auto mode, mm (print time!)
   orient: 'flat',   // print orientation: 'flat' | 'tilt' (45°×45°, supports)
-  clearance: 0,     // clearance per side, mm (fixed; tune fit in the slicer)
+  // Clearance per side, mm. Tilted prints come out tighter and get a
+  // nominal gap; flat prints rely on the snap fixators alone.
+  tiltClearance: 0.1,
   bedW: 256,        // print plate size, mm (fixed)
   bedH: 256,
   seed: 'cube-001',
@@ -51,7 +53,7 @@ function layoutFor(m) {
     plateCount: state.scale,
     bedW: state.bedW,
     bedH: state.bedH,
-    clearance: state.clearance,
+    clearance: state.orient === 'tilt' ? state.tiltClearance : 0,
     tilt: state.orient === 'tilt',
   });
 }
