@@ -488,7 +488,12 @@ function tryBuild(d, N, rng, force) {
   const canonOf = kk => (aliasOf.has(kk) ? aliasOf.get(kk) : kk);
   // Faces whose grid contains this voxel (shared voxels live in 2–3 grids)
   const facesOf = ck => (groups.get(ck) || [ck]).map(k => (k / (N * N)) | 0);
-  const fixators = new Map(); // 'k1<k2' (canonical voxel keys) → bump owner element id
+  // Qualified walls per adjacent piece pair. A wall qualifies when it is
+  // a SIDE wall of both owners' prisms: both voxels have to be visible
+  // in each owner's face grid (at cube corners a wall can be a side wall
+  // for one piece but a cap face for the other — skip those).
+  const pairWallsQ = new Map(); // 'a|b' (element ids) → [fk...] in scan order
+  const seenWall = new Set();
   for (let fi = 0; fi < NF; fi++) {
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
@@ -498,22 +503,32 @@ function tryBuild(d, N, rng, force) {
           const o2 = owner(fi, i2, j2);
           if (o1 === o2) return;
           const c1 = canonOf(k1), c2 = canonOf(key(fi, i2, j2));
-          // The wall must be a SIDE wall of both owners' prisms: both
-          // voxels have to be visible in each owner's face grid (at cube
-          // corners a wall can be a side wall for one piece but a cap
-          // face for the other — no fixator there).
           const f1s = facesOf(c1), f2s = facesOf(c2);
           const fo1 = elemFace(o1), fo2 = elemFace(o2);
           if (!f1s.includes(fo1) || !f2s.includes(fo1)) return;
           if (!f1s.includes(fo2) || !f2s.includes(fo2)) return;
           const fk = c1 < c2 ? c1 + '<' + c2 : c2 + '<' + c1;
-          if (fixators.has(fk)) return;
-          fixators.set(fk, rng() < 0.5 ? o1 : o2);
+          if (seenWall.has(fk)) return;
+          seenWall.add(fk);
+          const pk = Math.min(o1, o2) + '|' + Math.max(o1, o2);
+          if (!pairWallsQ.has(pk)) pairWallsQ.set(pk, []);
+          pairWallsQ.get(pk).push(fk);
         };
         if (i + 1 < N) consider(i + 1, j);
         if (j + 1 < N) consider(i, j + 1);
       }
     }
+  }
+  // One fixator per pair carries the load; a second one on long contacts.
+  // More would only fight the assembly: every hemisphere is a snap fit.
+  const fixators = new Map(); // fk → bump owner element id
+  for (const pk of [...pairWallsQ.keys()].sort()) {
+    const ws = pairWallsQ.get(pk);
+    const [pa, pb] = pk.split('|').map(Number);
+    const picks = ws.length >= 8
+      ? [Math.floor(ws.length / 4), Math.floor(3 * ws.length / 4)]
+      : [Math.floor(ws.length / 2)];
+    for (const qi of picks) fixators.set(ws[qi], rng() < 0.5 ? pa : pb);
   }
 
   // ---- Outlines and adjacency ----
