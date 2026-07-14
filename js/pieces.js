@@ -31,7 +31,7 @@ const DOVETAIL = 0;
    the cube face boundaries (edge-tooth walls get them too). The bump
    side is chosen randomly but deterministically by seed.
    Radius in cell units. */
-const FIX_R = 0.28;
+const FIX_R = 0.18;
 
 function pieceCount(d) { return 12 * d * d; }
 
