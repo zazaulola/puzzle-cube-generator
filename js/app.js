@@ -4,6 +4,7 @@
    ============================================================ */
 
 const COLOR_NAMES = ['c1', 'c2', 'c3', 'c4'];
+const DEFAULT_PALETTE = ['#e8543f', '#f4b942', '#3e9e6e', '#3d7dd8'];
 const state = {
   difficulty: 2,
   colors: 4,
@@ -18,8 +19,68 @@ const state = {
   bedW: 256,        // print plate size, mm (fixed)
   bedH: 256,
   seed: 'cube-001',
-  palette: ['#e8543f', '#f4b942', '#3e9e6e', '#3d7dd8'],
+  palette: [...DEFAULT_PALETTE],
 };
+
+/* ---------- Shareable quest link (URL hash) ---------- */
+function stateToHash() {
+  const p = new URLSearchParams();
+  p.set('d', state.difficulty);
+  p.set('c', state.colors);
+  p.set('k', state.scale);
+  p.set('o', state.orient);
+  p.set('m', state.maxCell);
+  p.set('seed', state.seed);
+  if (!state.autoEdge) p.set('e', state.baseEdge);
+  if (state.palette.join() !== DEFAULT_PALETTE.join())
+    p.set('pal', state.palette.map(x => x.replace('#', '')).join('.'));
+  if (document.body.classList.contains('debug')) p.set('dbg', '1');
+  return p.toString();
+}
+
+function applyHash() {
+  const h = location.hash.replace(/^#/, '');
+  if (!h) return false;
+  const p = new URLSearchParams(h);
+  const int = (v, lo, hi, dflt) => {
+    const n = parseInt(v, 10);
+    return isNaN(n) ? dflt : Math.min(hi, Math.max(lo, n));
+  };
+  if (p.has('d')) state.difficulty = int(p.get('d'), 1, 4, state.difficulty);
+  if (p.has('c')) state.colors = p.get('c') === '1' ? 1 : 4;
+  if (p.has('k')) state.scale = int(p.get('k'), 1, 3, state.scale);
+  if (p.has('o')) state.orient = p.get('o') === 'tilt' ? 'tilt' : 'flat';
+  if (p.has('m')) state.maxCell = int(p.get('m'), 1, 30, state.maxCell);
+  if (p.has('seed')) state.seed = (p.get('seed') || state.seed).slice(0, 64);
+  if (p.has('e')) {
+    state.autoEdge = false;
+    state.baseEdge = int(p.get('e'), 24, 400, state.baseEdge);
+  } else {
+    state.autoEdge = true;
+  }
+  if (p.has('pal')) {
+    const parts = p.get('pal').split('.');
+    if (parts.length === 4 && parts.every(x => /^[0-9a-fA-F]{6}$/.test(x)))
+      state.palette = parts.map(x => '#' + x.toLowerCase());
+  }
+  if (p.get('dbg') === '1') document.body.classList.add('debug');
+  return true;
+}
+
+// Sync all controls to the current state (after loading a shared link)
+function syncUI() {
+  const syncSeg = (rootSel, val) =>
+    $$(rootSel + ' button').forEach(b => b.classList.toggle('on', b.dataset.v === String(val)));
+  syncSeg('#seg-difficulty', state.difficulty);
+  syncSeg('#seg-colors', state.colors);
+  syncSeg('#seg-scale', state.scale);
+  syncSeg('#seg-orient', state.orient);
+  $('#chk-auto').checked = state.autoEdge;
+  if (!state.autoEdge) $('#inp-edge').value = state.baseEdge;
+  $('#inp-maxcell').value = state.maxCell;
+  $('#inp-seed').value = state.seed;
+  $$('#color-pickers input').forEach((inp, k) => { inp.value = state.palette[k]; });
+}
 
 let model = null;
 let plates = [];
@@ -95,6 +156,7 @@ function regenerate() {
   const edgeInp = $('#inp-edge');
   edgeInp.disabled = state.autoEdge;
   if (state.autoEdge) edgeInp.value = L;
+  history.replaceState(null, '', '#' + stateToHash()); // shareable quest link
   renderAll();
 }
 
@@ -250,6 +312,8 @@ function randomSeed() {
 
 function init() {
   setLang(detectLang());
+  if (new URLSearchParams(location.search).has('debug')) document.body.classList.add('debug');
+  applyHash(); // restore a shared quest before wiring the controls
   const langSel = $('#lang-select');
   langSel.value = currentLang;
   langSel.addEventListener('change', () => {
@@ -291,6 +355,21 @@ function init() {
 
   $('#btn-zip').addEventListener('click', downloadAll);
 
+  // share: copy the quest link to the clipboard
+  const shareBtn = $('#btn-share');
+  shareBtn.addEventListener('click', async () => {
+    const url = location.origin + location.pathname + location.search + '#' + stateToHash();
+    history.replaceState(null, '', '#' + stateToHash());
+    try { await navigator.clipboard.writeText(url); } catch (e) { /* clipboard unavailable */ }
+    shareBtn.textContent = '✓';
+    setTimeout(() => { shareBtn.textContent = '🔗'; }, 1200);
+  });
+
+  // a manually edited / navigated hash loads that quest
+  window.addEventListener('hashchange', () => {
+    if (applyHash()) { syncUI(); regenerate(); }
+  });
+
   // preview tabs (re-render after showing: a hidden container has zero width)
   $$('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -310,6 +389,7 @@ function init() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => { if (model) renderAll(); }, 150);
   });
+  syncUI();
   regenerate();
 }
 

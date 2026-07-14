@@ -27,8 +27,8 @@ function tracePoly(ctx, poly, sx, sy, ox, oy) {
 
 // Cube net (4×3 cross of faces)
 function drawNet(canvas, model, palette, colorsCount) {
-  const box = canvas.parentElement.getBoundingClientRect();
-  const cssW = Math.max(320, box.width - 2);
+  const box = (canvas.closest('.view') || canvas.parentElement).getBoundingClientRect();
+  const cssW = Math.max(320, box.width - 62);
   const pad = 34;
   const cell = (cssW - pad * 2) / 4;
   const cssH = cell * 3 + pad * 2;
@@ -55,30 +55,35 @@ function drawNet(canvas, model, palette, colorsCount) {
       ctx.stroke();
     }
   }
-  // hidden hemisphere fixators: dot = bump, ring = socket (drawn at the
-  // wall midpoints; a shared wall shows the pair as a dot inside a ring)
-  const rDot = Math.max(1.2, FIX_R * model.c * s * 0.9);
-  ctx.lineWidth = 1;
-  for (const f of model.faces) {
-    const [gx, gy] = NET_LAYOUT[f.name];
-    const ox = pad + gx * cell + 3;
-    const oy = pad + (2 - gy) * cell + 3 + model.L * s;
-    for (const p of f.pieces) {
-      if (!p.feats || !p.outline) continue;
-      const nOut = p.outline.length;
-      for (const [k, type] of p.feats) {
-        const P0 = p.outline[k], P1 = p.outline[(k + 1) % nOut];
-        const mx = ((P0[0] + P1[0]) / 2) * model.c, my = ((P0[1] + P1[1]) / 2) * model.c;
-        const px = ox + mx * s, py = oy - my * s;
-        ctx.beginPath();
-        if (type === 'bump') {
-          ctx.fillStyle = 'rgba(12,16,20,0.65)';
-          ctx.arc(px, py, rDot * 0.55, 0, 2 * Math.PI);
-          ctx.fill();
-        } else {
-          ctx.strokeStyle = 'rgba(12,16,20,0.65)';
-          ctx.arc(px, py, rDot, 0, 2 * Math.PI);
-          ctx.stroke();
+  // hidden hemisphere fixators: dot = bump, ring = socket, on a separate
+  // overlay canvas — CSS keeps it hidden unless body.debug is set
+  const fixCv = document.getElementById('net-fix');
+  if (fixCv) {
+    const fctx = setupCanvas(fixCv, cssW, cssH);
+    fctx.clearRect(0, 0, cssW, cssH);
+    const rDot = Math.max(1.2, FIX_R * model.c * s * 0.9);
+    fctx.lineWidth = 1;
+    for (const f of model.faces) {
+      const [gx, gy] = NET_LAYOUT[f.name];
+      const ox = pad + gx * cell + 3;
+      const oy = pad + (2 - gy) * cell + 3 + model.L * s;
+      for (const p of f.pieces) {
+        if (!p.feats || !p.outline) continue;
+        const nOut = p.outline.length;
+        for (const [k, type] of p.feats) {
+          const P0 = p.outline[k], P1 = p.outline[(k + 1) % nOut];
+          const mx = ((P0[0] + P1[0]) / 2) * model.c, my = ((P0[1] + P1[1]) / 2) * model.c;
+          const px = ox + mx * s, py = oy - my * s;
+          fctx.beginPath();
+          if (type === 'bump') {
+            fctx.fillStyle = 'rgba(12,16,20,0.75)';
+            fctx.arc(px, py, rDot * 0.55, 0, 2 * Math.PI);
+            fctx.fill();
+          } else {
+            fctx.strokeStyle = 'rgba(12,16,20,0.75)';
+            fctx.arc(px, py, rDot, 0, 2 * Math.PI);
+            fctx.stroke();
+          }
         }
       }
     }

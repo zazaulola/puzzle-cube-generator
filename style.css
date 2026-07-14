@@ -189,7 +189,11 @@ body {
 .tab.on { background: var(--accent-2); border-color: var(--accent-2); color: #06272c; }
 
 .view { padding: 26px 30px 40px; }
-#net-canvas { display: block; margin: 0 auto; max-width: 100%; }
+.net-wrap { position: relative; margin: 0 auto; width: fit-content; max-width: 100%; }
+#net-canvas { display: block; max-width: 100%; }
+/* fixator markers live on their own layer — debug only */
+#net-fix { position: absolute; left: 0; top: 0; display: none; pointer-events: none; }
+body.debug #net-fix { display: block; }
 #plates-grid { display: flex; flex-wrap: wrap; gap: 18px; }
 .plate-card {
   background: var(--panel); border: 1px solid var(--line);

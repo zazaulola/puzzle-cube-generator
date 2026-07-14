@@ -25,6 +25,8 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 | Max cell | mm, default 4 | caps the piece size in auto mode — the cell equals the piece thickness, and bigger cells print much longer |
 | Seed | text | deterministic: the same seed always yields the same cutting |
 
+Every configuration has a **shareable link**: the URL hash encodes the whole quest (`#d=2&c=4&k=1&o=flat&m=4&seed=…`) — the 🔗 button copies it, and opening such a link restores the exact same puzzle. Appending `&dbg=1` (or `?debug`) reveals the hidden fixator markers on the net preview: dot = bump, ring = socket.
+
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.
 
 ## Printing
