@@ -11,7 +11,7 @@ const state = {
   scale: 1,
   autoEdge: true,   // pick the largest cube edge that fits the plates
   baseEdge: 80,     // cube edge at 1x (manual mode), mm
-  maxCell: 4,       // cap on the cell size in auto mode, mm (print time!)
+  maxCell: 6,       // cap on the cell size in auto mode, mm (print time!)
   orient: 'flat',   // print orientation: 'flat' | 'tilt' (45°×45°, supports)
   // Clearance per side, mm. Tilted prints come out tighter and get a
   // nominal gap; flat prints rely on the snap fixators alone.

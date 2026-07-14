@@ -22,10 +22,10 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 | Colors | 1 or 4 | with 4 colors, adjacent pieces (including across cube edges) always differ — an exact 4-coloring of the adjacency graph |
 | Scale | 1×/2×/3× | build plates per color; more plates → bigger pieces |
 | Cube edge | auto or manual | auto mode binary-searches the largest cube that fits the planned plates |
-| Max cell | mm, default 4 | caps the piece size in auto mode — the cell equals the piece thickness, and bigger cells print much longer |
+| Max cell | mm, default 6 | caps the piece size in auto mode — the cell equals the piece thickness, and bigger cells print much longer |
 | Seed | text | deterministic: the same seed always yields the same cutting |
 
-Every configuration has a **shareable link**: the URL hash encodes the whole quest (`#d=2&c=4&k=1&o=flat&m=4&seed=…`) — the 🔗 button copies it, and opening such a link restores the exact same puzzle. Appending `&dbg=1` (or `?debug`) reveals the hidden fixator markers on the net preview: dot = bump, ring = socket.
+Every configuration has a **shareable link**: the URL hash encodes the whole quest (`#d=2&c=4&k=1&o=flat&m=6&seed=…`) — the 🔗 button copies it, and opening such a link restores the exact same puzzle. Appending `&dbg=1` (or `?debug`) reveals the hidden fixator markers on the net preview: dot = bump, ring = socket.
 
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.
 
