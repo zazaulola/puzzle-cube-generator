@@ -492,14 +492,14 @@ function tryBuild(d, N, rng, force) {
   // a SIDE wall of both owners' prisms: both voxels have to be visible
   // in each owner's face grid (at cube corners a wall can be a side wall
   // for one piece but a cap face for the other — skip those).
-  const pairWallsQ = new Map(); // 'a|b' (element ids) → [fk...] in scan order
+  const pairWallsQ = new Map(); // 'a|b' → [{fk, x, y, vert}] in scan order
   const seenWall = new Set();
   for (let fi = 0; fi < NF; fi++) {
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const o1 = owner(fi, i, j);
         const k1 = key(fi, i, j);
-        const consider = (i2, j2) => {
+        const consider = (i2, j2, wall) => {
           const o2 = owner(fi, i2, j2);
           if (o1 === o2) return;
           const c1 = canonOf(k1), c2 = canonOf(key(fi, i2, j2));
@@ -512,23 +512,42 @@ function tryBuild(d, N, rng, force) {
           seenWall.add(fk);
           const pk = Math.min(o1, o2) + '|' + Math.max(o1, o2);
           if (!pairWallsQ.has(pk)) pairWallsQ.set(pk, []);
-          pairWallsQ.get(pk).push(fk);
+          pairWallsQ.get(pk).push({ fk, ...wall });
         };
-        if (i + 1 < N) consider(i + 1, j);
-        if (j + 1 < N) consider(i, j + 1);
+        if (i + 1 < N) consider(i + 1, j, { x: i + 1, y: j + 0.5, vert: 1 });
+        if (j + 1 < N) consider(i, j + 1, { x: i + 0.5, y: j + 1, vert: 0 });
       }
     }
   }
-  // One fixator per pair carries the load; a second one on long contacts.
-  // More would only fight the assembly: every hemisphere is a snap fit.
+  /* Load-bearing walls only. Pulling two pieces apart happens across the
+     contact's principal direction; a hemisphere on a wall FACING that
+     pull slides straight out of its socket and carries nothing (shear
+     along the seam is already blocked by the teeth themselves). Only
+     walls whose normal runs ALONG the contact — the tooth flanks — force
+     the bump to climb out of the socket, so only they get fixators:
+     one near the middle of the seam, a second on long contacts. */
   const fixators = new Map(); // fk → bump owner element id
   for (const pk of [...pairWallsQ.keys()].sort()) {
     const ws = pairWallsQ.get(pk);
     const [pa, pb] = pk.split('|').map(Number);
-    const picks = ws.length >= 8
-      ? [Math.floor(ws.length / 4), Math.floor(3 * ws.length / 4)]
-      : [Math.floor(ws.length / 2)];
-    for (const qi of picks) fixators.set(ws[qi], rng() < 0.5 ? pa : pb);
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    for (const w of ws) {
+      if (w.x < xMin) xMin = w.x; if (w.x > xMax) xMax = w.x;
+      if (w.y < yMin) yMin = w.y; if (w.y > yMax) yMax = w.y;
+    }
+    const principalX = (xMax - xMin) >= (yMax - yMin);
+    let useful = ws.filter(w => (principalX ? w.vert === 1 : w.vert === 0));
+    if (!useful.length) useful = ws; // incidental 1-wall contacts etc.
+    useful.sort((a, b) => principalX ? (a.x - b.x || a.y - b.y) : (a.y - b.y || a.x - b.x));
+    let picks;
+    if (ws.length >= 8 && useful.length >= 2) {
+      const q1 = Math.floor((useful.length - 1) * 0.3);
+      const q2 = Math.ceil((useful.length - 1) * 0.7);
+      picks = q1 === q2 ? [useful[q1]] : [useful[q1], useful[q2]];
+    } else {
+      picks = [useful[Math.floor(useful.length / 2)]];
+    }
+    for (const w of picks) fixators.set(w.fk, rng() < 0.5 ? pa : pb);
   }
 
   // ---- Outlines and adjacency ----
