@@ -30,6 +30,15 @@
   </header>
 
   <section class="ctrl">
+    <label class="ctrl-label" data-i18n="seed">Seed</label>
+    <div class="seed-row">
+      <input class="num" id="inp-seed" type="text">
+      <button id="btn-reseed" data-i18n-title="reseedTip" title="random cutting variant">⟳</button>
+      <button id="btn-share" data-i18n-title="shareTip" title="copy share link">🔗</button>
+    </div>
+  </section>
+
+  <section class="ctrl">
     <label class="ctrl-label" data-i18n="difficulty">Difficulty</label>
     <div class="seg" id="seg-difficulty">
       <button data-v="1"><b>1</b><i>12</i></button>
@@ -70,14 +79,6 @@
       <label class="ctrl-label" data-i18n="maxCell">Max cell, mm</label>
       <input class="num" id="inp-maxcell" type="text">
       <p class="note" data-i18n="cellNote">cell = piece thickness; smaller prints faster</p>
-    </div>
-    <div>
-      <label class="ctrl-label" data-i18n="seed">Seed</label>
-      <div class="seed-row">
-        <input class="num" id="inp-seed" type="text">
-        <button id="btn-reseed" data-i18n-title="reseedTip" title="random cutting variant">⟳</button>
-        <button id="btn-share" data-i18n-title="shareTip" title="copy share link">🔗</button>
-      </div>
     </div>
   </section>
 
