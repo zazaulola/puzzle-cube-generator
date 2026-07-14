@@ -1,66 +1,128 @@
 'use strict';
 /* ============================================================
-   stl.js — triangulation, extrusion, binary STL, ZIP (store)
+   stl.js — 3D piece meshes (voxel caps, walls with hidden
+   hemisphere fixators), binary STL, ZIP (store)
    ============================================================ */
 
-// Ear clipping for a simple polygon (CCW). Returns triples of indices.
-function triangulate(poly) {
+const FIX_SEG = 12; // segments of the fixator ring
+const FIX_LAT = 3;  // latitude rows of the hemisphere
+
+/* Per-vertex miter offset of a polygon (inward by delta, CCW input).
+   Unlike offsetPolygon, keeps the vertex count/order — the mesh needs
+   a 1:1 mapping between original and displaced boundary vertices. */
+function offsetVerts(poly, delta) {
   const n = poly.length;
-  if (n < 3) return [];
-  let pts = poly;
-  if (signedArea(pts) < 0) pts = [...pts].reverse();
-  const V = [...Array(pts.length).keys()];
-  const tris = [];
-  let guard = 0, i = 0;
-  const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  const inTri = (p, a, b, c) =>
-    cross(a, b, p) >= -1e-9 && cross(b, c, p) >= -1e-9 && cross(c, a, p) >= -1e-9;
-  while (V.length > 3 && guard < 30000) {
-    guard++;
-    const m = V.length;
-    const i0 = V[(i - 1 + m) % m], i1 = V[i % m], i2 = V[(i + 1) % m];
-    const a = pts[i0], b = pts[i1], c = pts[i2];
-    let ear = cross(a, b, c) > 1e-9;
-    if (ear) {
-      for (const vi of V) {
-        if (vi === i0 || vi === i1 || vi === i2) continue;
-        if (inTri(pts[vi], a, b, c)) { ear = false; break; }
-      }
-    }
-    if (ear) { tris.push([i0, i1, i2]); V.splice(i % m, 1); i = 0; }
-    else i++;
-    if (i > 2 * V.length) { // degeneracy: clip by force, skipping zero-area ears
-      if (Math.abs(cross(pts[V[0]], pts[V[1]], pts[V[2]])) > 1e-9)
-        tris.push([V[0], V[1], V[2]]);
-      V.splice(1, 1); i = 0;
-    }
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const p0 = poly[(i - 1 + n) % n], p1 = poly[i], p2 = poly[(i + 1) % n];
+    const n1 = edgeNormal(p0, p1), n2 = edgeNormal(p1, p2);
+    let mx = n1[0] + n2[0], my = n1[1] + n2[1];
+    const ml = Math.hypot(mx, my);
+    if (ml < 1e-9) { out[i] = [p1[0] - n1[0] * delta, p1[1] - n1[1] * delta]; continue; }
+    mx /= ml; my /= ml;
+    const cosHalf = mx * n1[0] + my * n1[1];
+    const k = delta / Math.max(0.35, cosHalf);
+    out[i] = [p1[0] - mx * k, p1[1] - my * k];
   }
-  if (V.length === 3) tris.push([V[0], V[1], V[2]]);
-  // map indices back to the original orientation
-  if (pts !== poly) {
-    const map = i => poly.length - 1 - i;
-    return tris.map(t => [map(t[0]), map(t[2]), map(t[1])]);
-  }
-  return tris;
+  return out;
 }
 
-// Piece mesh: outline poly (mm) + thickness t → flat triangle array [ax,ay,az, bx..., cx...]
-function extrudePiece(poly, t, out) {
-  let pts = poly;
-  if (signedArea(pts) < 0) pts = [...pts].reverse(); // CCW
-  const tris = triangulate(pts);
-  for (const [a, b, c] of tris) {
-    // top cap (normal +z)
-    out.push(pts[a][0], pts[a][1], t, pts[b][0], pts[b][1], t, pts[c][0], pts[c][1], t);
-    // bottom cap (normal -z)
-    out.push(pts[a][0], pts[a][1], 0, pts[c][0], pts[c][1], 0, pts[b][0], pts[b][1], 0);
+/* Mesh of one piece.
+   piece: { outline (unit ints, CCW), cells (unit ints), feats: Map<edgeIdx,'bump'|'socket'> }
+   c — cell size (mm), t — thickness (mm), clearance — inward offset (mm),
+   emit(9 numbers) — triangle sink (world transform applied by the caller). */
+function buildPieceMesh(piece, c, t, clearance, emit) {
+  const unit = piece.outline;
+  const mm = unit.map(p => [p[0] * c, p[1] * c]);
+  const disp = clearance > 0 ? offsetVerts(mm, clearance) : mm;
+  const bmap = new Map();
+  unit.forEach((p, k) => bmap.set(p[0] + ',' + p[1], disp[k]));
+  const P = (i, j) => bmap.get(i + ',' + j) || [i * c, j * c];
+
+  // caps: two triangles per cell, top and bottom
+  for (const [i, j] of piece.cells) {
+    const a = P(i, j), b = P(i + 1, j), d = P(i + 1, j + 1), e = P(i, j + 1);
+    emit(a[0], a[1], t, b[0], b[1], t, d[0], d[1], t);
+    emit(a[0], a[1], t, d[0], d[1], t, e[0], e[1], t);
+    emit(a[0], a[1], 0, d[0], d[1], 0, b[0], b[1], 0);
+    emit(a[0], a[1], 0, e[0], e[1], 0, d[0], d[1], 0);
   }
-  const n = pts.length;
-  for (let i = 0; i < n; i++) {
-    const p = pts[i], q = pts[(i + 1) % n];
-    // side wall (outward for CCW)
-    out.push(p[0], p[1], 0, q[0], q[1], 0, q[0], q[1], t);
-    out.push(p[0], p[1], 0, q[0], q[1], t, p[0], p[1], t);
+
+  // walls per unit outline edge
+  const n = unit.length;
+  const r = FIX_R * c;
+  for (let k = 0; k < n; k++) {
+    const A = disp[k], B = disp[(k + 1) % n];
+    const feat = piece.feats ? piece.feats.get(k) : undefined;
+    if (!feat) {
+      emit(A[0], A[1], 0, B[0], B[1], 0, B[0], B[1], t);
+      emit(A[0], A[1], 0, B[0], B[1], t, A[0], A[1], t);
+    } else {
+      wallWithFixator(A, B, t, r, feat === 'bump' ? 1 : -1, emit);
+    }
+  }
+}
+
+/* Wall rectangle A→B (0..t vertical) with a hemisphere of radius r at its
+   center: dir=+1 — bump (outward), dir=−1 — socket (carved inward).
+   Local wall frame: u along the edge, w vertical, nrm outward (CCW).
+   The rect boundary keeps ONLY its 4 corners (no extra edge vertices),
+   so caps and neighboring walls mate without T-vertices. The same
+   triangle order serves bump and socket: mirroring the heights makes
+   the normals come out right, and the ring edges stay paired with the
+   annulus. */
+function wallWithFixator(A, B, t, r, dir, emit) {
+  const ex = B[0] - A[0], ey = B[1] - A[1];
+  const el = Math.hypot(ex, ey);
+  const ux = ex / el, uy = ey / el;
+  const nx = uy, ny = -ux; // outward for CCW
+  const C = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, t / 2];
+  // local (a,b) → world; h — offset along the outward normal
+  const p3 = (a, b, h) => [C[0] + ux * a + nx * h, C[1] + uy * a + ny * h, C[2] + b];
+  const tri = (a, b, cc) => emit(a[0], a[1], a[2], b[0], b[1], b[2], cc[0], cc[1], cc[2]);
+  const K = FIX_SEG;
+
+  // annulus: stitch the 4-corner boundary loop to the K-point ring loop
+  const angAt = k => (2 * Math.PI * k) / K; // corners sit near odd 45° — no collisions
+  const ring = [];
+  for (let k = 0; k < K; k++) ring.push({ ang: angAt(k), pt: p3(r * Math.cos(angAt(k)), r * Math.sin(angAt(k)), 0), isR: true });
+  // corner vertices reuse the EXACT endpoint coordinates shared with the
+  // caps and neighboring walls — recomputing them via the midpoint would
+  // differ in the last float bits and break vertex identity
+  const cornerPts = { '1,1': [B[0], B[1], t], '-1,1': [A[0], A[1], t], '-1,-1': [A[0], A[1], 0], '1,-1': [B[0], B[1], 0] };
+  const corners = [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([sa, sb]) => {
+    const th = (Math.atan2(sb * t / 2, sa * el / 2) + 2 * Math.PI) % (2 * Math.PI);
+    return { ang: th, pt: cornerPts[sa + ',' + sb], isR: false };
+  });
+  const events = ring.concat(corners).sort((a, b) => a.ang - b.ang);
+  let lastR = null, lastB = null;
+  for (let q = events.length - 1; q >= 0 && (!lastR || !lastB); q--) {
+    if (events[q].isR && !lastR) lastR = events[q].pt;
+    if (!events[q].isR && !lastB) lastB = events[q].pt;
+  }
+  for (const e of events) {
+    tri(lastB, e.pt, lastR);
+    if (e.isR) lastR = e.pt; else lastB = e.pt;
+  }
+
+  // hemisphere: rows from the ring to the apex (heights signed by dir)
+  let prev = ring.map(rp => rp.pt);
+  for (let m2 = 1; m2 <= FIX_LAT; m2++) {
+    const ph = (m2 / FIX_LAT) * Math.PI / 2;
+    const rr = r * Math.cos(ph), hh = dir * r * Math.sin(ph);
+    if (m2 === FIX_LAT) {
+      const apex = p3(0, 0, hh);
+      for (let k = 0; k < K; k++) tri(prev[k], prev[(k + 1) % K], apex);
+    } else {
+      const row = [];
+      for (let k = 0; k < K; k++) row.push(p3(rr * Math.cos(angAt(k)), rr * Math.sin(angAt(k)), hh));
+      for (let k = 0; k < K; k++) {
+        const a = prev[k], b = prev[(k + 1) % K];
+        const a2 = row[k], b2 = row[(k + 1) % K];
+        tri(a, b, b2); tri(a, b2, a2);
+      }
+      prev = row;
+    }
   }
 }
 
@@ -92,20 +154,28 @@ function buildSTL(coords) {
   return buf;
 }
 
-// STL for a single plate
-function plateSTL(plate, thickness) {
+// STL for one plate. Flat pieces translate by (dx,dy); tilted pieces are
+// rotated 45°×45° and each dropped so its own lowest point touches the bed.
+function plateSTL(plate, model) {
   const coords = [];
+  const c = model.c, t = model.t;
   for (const pc of plate.pieces) {
+    const local = [];
+    const emit = (...v) => local.push(...v);
+    buildPieceMesh(pc.piece, c, t, plate.clearance || 0, emit);
     if (pc.tilt) {
-      // tilted piece: extrude flat, then rotate 45°×45° and drop onto the bed
-      const local = [];
-      extrudePiece(pc.tilt.src, thickness, local);
+      let zmin = Infinity;
+      const tv = [];
       for (let k = 0; k < local.length; k += 3) {
         const v = tilt45(local[k], local[k + 1], local[k + 2]);
-        coords.push(v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - pc.tilt.zmin);
+        tv.push(v);
+        if (v[2] < zmin) zmin = v[2];
       }
+      for (const v of tv) coords.push(v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - zmin);
     } else {
-      extrudePiece(pc.poly, thickness, coords);
+      for (let k = 0; k < local.length; k += 3) {
+        coords.push(local[k] + pc.dx, local[k + 1] + pc.dy, local[k + 2]);
+      }
     }
   }
   return buildSTL(coords);

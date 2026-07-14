@@ -193,13 +193,13 @@ function downloadBlob(blob, name) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000);
 }
 function downloadPlate(pl) {
-  const buf = plateSTL(pl, model.c);
+  const buf = plateSTL(pl, model);
   downloadBlob(new Blob([buf], { type: 'model/stl' }), plateFileName(pl));
 }
 function downloadAll() {
   const files = plates.map(pl => ({
     name: plateFileName(pl),
-    data: new Uint8Array(plateSTL(pl, model.c)),
+    data: new Uint8Array(plateSTL(pl, model)),
   }));
   const readme =
 `${t('rm_title')}

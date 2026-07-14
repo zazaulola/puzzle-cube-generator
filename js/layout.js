@@ -113,6 +113,7 @@ function layoutPlates(model, opts) {
       pending = packOnePlate(plates, g.color, extra++, pending, bedW, bedH, margin, gap, true);
     }
   }
+  for (const p of plates) p.clearance = clearance; // the mesh builder needs it
   const misfit = plates.some(p => p.tooBig);
   return { plates, overflowCount, misfit };
 }
@@ -122,13 +123,13 @@ function layoutPlates(model, opts) {
 // offsets for STL generation.
 function placeItem(it, dx, dy) {
   if (!it.r0) {
-    return { piece: it.piece, poly: it.poly.map(p => [p[0] + dx, p[1] + dy]) };
+    return { piece: it.piece, dx, dy, poly: it.poly.map(p => [p[0] + dx, p[1] + dy]) };
   }
   return {
     piece: it.piece,
     poly: it.r0.map(v => [v[0] + dx, v[1] + dy]),
     poly2: it.r1.map(v => [v[0] + dx, v[1] + dy]),
-    tilt: { src: it.poly, dx, dy, zmin: it.zmin },
+    tilt: { dx, dy },
   };
 }
 
