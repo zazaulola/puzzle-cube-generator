@@ -61,7 +61,7 @@ function drawNet(canvas, model, palette, colorsCount) {
   if (fixCv) {
     const fctx = setupCanvas(fixCv, cssW, cssH);
     fctx.clearRect(0, 0, cssW, cssH);
-    const rDot = Math.max(1.2, FIX_R * model.c * s * 0.9);
+    const rDot = Math.max(1.2, FIX_R * Math.sqrt(1 - FIX_SINK * FIX_SINK) * model.c * s * 0.9);
     fctx.lineWidth = 1;
     for (const f of model.faces) {
       const [gx, gy] = NET_LAYOUT[f.name];

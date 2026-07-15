@@ -82,10 +82,16 @@ function wallWithFixator(A, B, t, r, dir, emit) {
   const tri = (a, b, cc) => emit(a[0], a[1], a[2], b[0], b[1], b[2], cc[0], cc[1], cc[2]);
   const K = FIX_SEG;
 
+  // The sphere is sunk into the wall: only a cap of height r·(1−FIX_SINK)
+  // protrudes. The wall ring sits where the sphere crosses the wall plane.
+  const e = FIX_SINK * r;              // center offset behind the wall
+  const rho = r * Math.sqrt(1 - FIX_SINK * FIX_SINK); // ring radius on the wall
+  const ph0 = Math.asin(FIX_SINK);     // latitude of the wall ring
+
   // annulus: stitch the 4-corner boundary loop to the K-point ring loop
   const angAt = k => (2 * Math.PI * k) / K; // corners sit near odd 45° — no collisions
   const ring = [];
-  for (let k = 0; k < K; k++) ring.push({ ang: angAt(k), pt: p3(r * Math.cos(angAt(k)), r * Math.sin(angAt(k)), 0), isR: true });
+  for (let k = 0; k < K; k++) ring.push({ ang: angAt(k), pt: p3(rho * Math.cos(angAt(k)), rho * Math.sin(angAt(k)), 0), isR: true });
   // corner vertices reuse the EXACT endpoint coordinates shared with the
   // caps and neighboring walls — recomputing them via the midpoint would
   // differ in the last float bits and break vertex identity
@@ -105,13 +111,14 @@ function wallWithFixator(A, B, t, r, dir, emit) {
     if (e.isR) lastR = e.pt; else lastB = e.pt;
   }
 
-  // hemisphere: rows from the ring to the apex (heights signed by dir)
+  // spherical cap: rows from the wall ring up to the apex (heights signed
+  // by dir); row 0 reuses the exact annulus ring vertices
   let prev = ring.map(rp => rp.pt);
   for (let m2 = 1; m2 <= FIX_LAT; m2++) {
-    const ph = (m2 / FIX_LAT) * Math.PI / 2;
-    const rr = r * Math.cos(ph), hh = dir * r * Math.sin(ph);
+    const ph = ph0 + (m2 / FIX_LAT) * (Math.PI / 2 - ph0);
+    const rr = r * Math.cos(ph), hh = dir * (r * Math.sin(ph) - e);
     if (m2 === FIX_LAT) {
-      const apex = p3(0, 0, hh);
+      const apex = p3(0, 0, dir * (r - e));
       for (let k = 0; k < K; k++) tri(prev[k], prev[(k + 1) % K], apex);
     } else {
       const row = [];

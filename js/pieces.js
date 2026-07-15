@@ -30,8 +30,12 @@ const DOVETAIL = 0;
    rotationally symmetric, they never betray the piece orientation or
    the cube face boundaries (edge-tooth walls get them too). The bump
    side is chosen randomly but deterministically by seed.
-   Radius in cell units. */
-const FIX_R = 0.18;
+   The sphere is sunk into the wall by FIX_SINK of its radius, so only
+   a shallow spherical cap protrudes — the snap ride-over is r·(1−sink)
+   instead of the full radius, which rigid plastics can actually click
+   over. Radius in cell units. */
+const FIX_R = 0.15;
+const FIX_SINK = 0.45;
 
 function pieceCount(d) { return 12 * d * d; }
 
