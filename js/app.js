@@ -174,6 +174,7 @@ function renderStats() {
   $('#stat-pieces').textContent = count;
   $('#stat-perface').textContent = count / 6;
   $('#stat-edge').textContent = fmt(model.L, 0) + ' ' + t('mm');
+  $('#stat-seed').textContent = state.seed;
   $('#stat-cell').textContent = `${fmt(model.c * 8, 1)}×${fmt(model.c * 4, 1)} ${t('mm')}`;
   $('#stat-thick').textContent = fmt(model.c, 2) + ' ' + t('mm');
   $('#stat-unique').textContent = model.unique ? '✓' : '—';
@@ -377,6 +378,9 @@ function init() {
       const isNet = tab.dataset.view === 'net';
       $('#view-net').style.display = isNet ? 'block' : 'none';
       $('#view-plates').style.display = isNet ? 'none' : 'block';
+      const bar = $('.statbar');
+      bar.classList.toggle('mode-net', isNet);
+      bar.classList.toggle('mode-plates', !isNet);
       if (!model) return;
       if (isNet) drawNet($('#net-canvas'), model, state.palette, state.colors);
       else renderPlates();

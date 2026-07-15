@@ -178,6 +178,14 @@ body {
   display: flex; flex-direction: column; gap: 1px;
 }
 .stat b { font-family: var(--disp); font-size: 16px; font-weight: 500; color: var(--ink); }
+#stat-seed { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* stats shown depend on the active tab */
+.statbar.mode-net .st-cell,
+.statbar.mode-net .st-thick,
+.statbar.mode-net .st-unique,
+.statbar.mode-net .st-plates { display: none; }
+.statbar.mode-plates .st-seed,
+.statbar.mode-plates .st-unique { display: none; }
 .stat span { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-faint); }
 .stat span em { font-style: normal; color: var(--warn); }
 .tabs { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 0 16px; }

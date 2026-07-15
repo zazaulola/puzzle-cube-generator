@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <meta name="theme-color" content="#12171d">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -107,14 +107,15 @@
 </aside>
 
 <main class="stage">
-  <div class="statbar">
+  <div class="statbar mode-net">
     <div class="stat"><b id="stat-pieces">—</b><span data-i18n="stPieces">pieces</span></div>
     <div class="stat"><b id="stat-perface">—</b><span data-i18n="stPerFace">per face</span></div>
     <div class="stat"><b id="stat-edge">—</b><span data-i18n="stEdge">cube edge</span></div>
-    <div class="stat"><b id="stat-cell">—</b><span data-i18n="stPiece">piece 8×4</span></div>
-    <div class="stat"><b id="stat-thick">—</b><span data-i18n="stCell">cell/thick.</span></div>
-    <div class="stat"><b id="stat-unique">—</b><span data-i18n="stUnique">unique</span></div>
-    <div class="stat"><b id="stat-plates">—</b><span><span data-i18n="stPlates">plates</span> <em id="stat-plates-note"></em></span></div>
+    <div class="stat st-seed"><b id="stat-seed">—</b><span data-i18n="seed">Seed</span></div>
+    <div class="stat st-cell"><b id="stat-cell">—</b><span data-i18n="stPiece">piece 8×4</span></div>
+    <div class="stat st-thick"><b id="stat-thick">—</b><span data-i18n="stCell">cell/thick.</span></div>
+    <div class="stat st-unique"><b id="stat-unique">—</b><span data-i18n="stUnique">unique</span></div>
+    <div class="stat st-plates"><b id="stat-plates">—</b><span><span data-i18n="stPlates">plates</span> <em id="stat-plates-note"></em></span></div>
     <div class="tabs">
       <button class="tab on" data-view="net" data-i18n="tabNet">NET</button>
       <button class="tab" data-view="plates" data-i18n="tabPlates">PLATES</button>
@@ -132,12 +133,12 @@
   </div>
 </main>
 
-<script src="js/i18n.js?v=30"></script>
-<script src="js/geometry.js?v=30"></script>
-<script src="js/pieces.js?v=30"></script>
-<script src="js/layout.js?v=30"></script>
-<script src="js/stl.js?v=30"></script>
-<script src="js/preview.js?v=30"></script>
-<script src="js/app.js?v=30"></script>
+<script src="js/i18n.js?v=31"></script>
+<script src="js/geometry.js?v=31"></script>
+<script src="js/pieces.js?v=31"></script>
+<script src="js/layout.js?v=31"></script>
+<script src="js/stl.js?v=31"></script>
+<script src="js/preview.js?v=31"></script>
+<script src="js/app.js?v=31"></script>
 </body>
 </html>
