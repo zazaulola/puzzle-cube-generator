@@ -306,9 +306,18 @@ function bindNumber(sel, key, min, max) {
 }
 
 function randomSeed() {
-  const words = ['grid', 'axis', 'bolt', 'gear', 'node', 'flux', 'iron', 'volt'];
-  return words[Math.floor(Math.random() * words.length)] + '-' +
-    String(Math.floor(Math.random() * 900) + 100);
+  // The seed itself is free text — this is just a readable suggestion.
+  const words = [
+    'grid', 'axis', 'bolt', 'gear', 'node', 'flux', 'iron', 'volt',
+    'prism', 'pixel', 'quark', 'delta', 'vertex', 'onyx', 'titan', 'nova',
+    'zinc', 'cobalt', 'ridge', 'joint', 'notch', 'facet', 'octa', 'helix',
+    'sigma', 'omega', 'pylon', 'rotor', 'servo', 'lathe', 'anvil', 'forge',
+    'ingot', 'beam', 'strut', 'truss', 'shard', 'torus', 'krypt', 'lumen',
+  ];
+  const w = () => words[Math.floor(Math.random() * words.length)];
+  let a = w(), b = w();
+  while (b === a) b = w();
+  return a + '-' + b + '-' + String(Math.floor(Math.random() * 9000) + 1000);
 }
 
 function init() {
