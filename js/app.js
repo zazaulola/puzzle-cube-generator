@@ -20,7 +20,54 @@ const state = {
   bedH: 256,
   seed: 'cube-001',
   palette: [...DEFAULT_PALETTE],
+  texts: {}, // face → { t (multi-line), h: l|c|r, v: t|m|b, s: eng|emb }
 };
+
+/* ---------- Face text rasterization (browser canvas) ---------- */
+function rasterizeTexts(N) {
+  const SUB = TEXT_SUB, NS = N * SUB;
+  const out = {};
+  for (const [face, cfg] of Object.entries(state.texts)) {
+    const lines = (cfg.t || '').replace(/\r/g, '').split('\n')
+      .map(s => s.slice(0, 32)).slice(0, 6);
+    if (!lines.join('').trim()) continue;
+    const cv = document.createElement('canvas');
+    cv.width = NS; cv.height = NS;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    const m = SUB + Math.max(2, Math.round(NS * 0.03)); // ≥1 cell off the rim
+    const availW = NS - 2 * m, availH = NS - 2 * m;
+    let px = Math.max(5, Math.floor(availH / lines.length / 1.2));
+    for (let iter = 0; iter < 8; iter++) {
+      ctx.font = `900 ${px}px Arial, sans-serif`;
+      const wMax = Math.max(...lines.map(s => ctx.measureText(s).width), 1);
+      if (wMax <= availW || px <= 5) break;
+      px = Math.max(5, Math.floor(px * availW / wMax));
+    }
+    ctx.font = `900 ${px}px Arial, sans-serif`;
+    const lineH = px * 1.2;
+    const blockH = lines.length * lineH;
+    const y0 = cfg.v === 't' ? m : cfg.v === 'b' ? NS - m - blockH : (NS - blockH) / 2;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = cfg.h === 'l' ? 'left' : cfg.h === 'r' ? 'right' : 'center';
+    const x = cfg.h === 'l' ? m : cfg.h === 'r' ? NS - m : NS / 2;
+    lines.forEach((s, i) => ctx.fillText(s, x, y0 + i * lineH + px * 0.8));
+    const img = ctx.getImageData(0, 0, NS, NS).data;
+    const data = new Uint8Array(NS * NS);
+    let any = false;
+    for (let y = 0; y < NS; y++) {
+      for (let xx = 0; xx < NS; xx++) {
+        // hard guarantee: nothing within the rim cell band
+        if (xx < SUB || y < SUB || xx >= NS - SUB || y >= NS - SUB) continue;
+        if (img[(y * NS + xx) * 4 + 3] > 128) {
+          data[(NS - 1 - y) * NS + xx] = 1; // face v axis points up
+          any = true;
+        }
+      }
+    }
+    if (any) out[face] = { data, style: cfg.s === 'emb' ? 'emb' : 'eng' };
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 /* ---------- Shareable quest link (URL hash) ---------- */
 function stateToHash() {
@@ -34,6 +81,9 @@ function stateToHash() {
   if (!state.autoEdge) p.set('e', state.baseEdge);
   if (state.palette.join() !== DEFAULT_PALETTE.join())
     p.set('pal', state.palette.map(x => x.replace('#', '')).join('.'));
+  for (const [face, cfg] of Object.entries(state.texts)) {
+    if ((cfg.t || '').trim()) p.set('x' + face, [cfg.s, cfg.h, cfg.v, cfg.t].join('.'));
+  }
   if (document.body.classList.contains('debug')) p.set('dbg', '1');
   return p.toString();
 }
@@ -63,14 +113,27 @@ function applyHash() {
     if (parts.length === 4 && parts.every(x => /^[0-9a-fA-F]{6}$/.test(x)))
       state.palette = parts.map(x => '#' + x.toLowerCase());
   }
+  state.texts = {};
+  for (const f of ['F', 'R', 'B', 'L', 'T', 'Bo']) {
+    const raw = p.get('x' + f);
+    if (!raw) continue;
+    const seg = raw.split('.');
+    if (seg.length < 4) continue;
+    const s = seg[0] === 'emb' ? 'emb' : 'eng';
+    const h = ['l', 'c', 'r'].includes(seg[1]) ? seg[1] : 'c';
+    const v = ['t', 'm', 'b'].includes(seg[2]) ? seg[2] : 'm';
+    const txt = seg.slice(3).join('.').slice(0, 200);
+    if (txt.trim()) state.texts[f] = { t: txt, h, v, s };
+  }
   if (p.get('dbg') === '1') document.body.classList.add('debug');
   return true;
 }
 
+const syncSeg = (rootSel, val) =>
+  $$(rootSel + ' button').forEach(b => b.classList.toggle('on', b.dataset.v === String(val)));
+
 // Sync all controls to the current state (after loading a shared link)
 function syncUI() {
-  const syncSeg = (rootSel, val) =>
-    $$(rootSel + ' button').forEach(b => b.classList.toggle('on', b.dataset.v === String(val)));
   syncSeg('#seg-difficulty', state.difficulty);
   syncSeg('#seg-colors', state.colors);
   syncSeg('#seg-scale', state.scale);
@@ -80,6 +143,33 @@ function syncUI() {
   $('#inp-maxcell').value = state.maxCell;
   $('#inp-seed').value = state.seed;
   $$('#color-pickers input').forEach((inp, k) => { inp.value = state.palette[k]; });
+  loadTextUI();
+}
+
+/* ---------- Face text controls ---------- */
+let curTextFace = 'F';
+const textCfg = f => state.texts[f] || { t: '', h: 'c', v: 'm', s: 'eng' };
+function loadTextUI() {
+  const cfg = textCfg(curTextFace);
+  $('#inp-text').value = cfg.t;
+  syncSeg('#seg-textface', curTextFace);
+  syncSeg('#seg-th', cfg.h);
+  syncSeg('#seg-tv', cfg.v);
+  syncSeg('#seg-ts', cfg.s);
+  // отметка граней с текстом
+  $$('#seg-textface button').forEach(b =>
+    b.classList.toggle('has', !!(state.texts[b.dataset.v] || {}).t));
+}
+function saveTextUI() {
+  const t2 = $('#inp-text').value.replace(/\r/g, '').slice(0, 200);
+  const pick = sel => ($(sel + ' button.on') || $(sel + ' button')).dataset.v;
+  if (t2.trim()) {
+    state.texts[curTextFace] = { t: t2, h: pick('#seg-th'), v: pick('#seg-tv'), s: pick('#seg-ts') };
+  } else {
+    delete state.texts[curTextFace];
+  }
+  loadTextUI();
+  regenerate();
 }
 
 let model = null;
@@ -146,6 +236,7 @@ function regenerate() {
     colors: state.colors,
     L: 8 * state.difficulty, // 1 mm cell — the base geometry
     seed: state.seed,
+    textMasks: rasterizeTexts(8 * state.difficulty),
   });
   const L = state.autoEdge ? findMaxEdge(base) : state.baseEdge * state.scale;
   model = scaledModel(base, L);
@@ -362,6 +453,24 @@ function init() {
     inp.value = state.palette[k];
     inp.addEventListener('input', () => { state.palette[k] = inp.value; renderAll(); });
   });
+
+  // face text controls
+  $$('#seg-textface button').forEach(b => {
+    b.addEventListener('click', () => { curTextFace = b.dataset.v; loadTextUI(); });
+  });
+  let textTimer = null;
+  $('#inp-text').addEventListener('input', () => {
+    clearTimeout(textTimer);
+    textTimer = setTimeout(saveTextUI, 450);
+  });
+  for (const sel of ['#seg-th', '#seg-tv', '#seg-ts']) {
+    $$(sel + ' button').forEach(b => {
+      b.addEventListener('click', () => {
+        $$(sel + ' button').forEach(x => x.classList.toggle('on', x === b));
+        saveTextUI();
+      });
+    });
+  }
 
   $('#btn-zip').addEventListener('click', downloadAll);
 

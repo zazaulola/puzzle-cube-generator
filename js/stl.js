@@ -70,8 +70,9 @@ function buildPieceMesh(piece, c, t, clearance, emit) {
    so caps and neighboring walls mate without T-vertices. The same
    triangle order serves bump and socket: mirroring the heights makes
    the normals come out right, and the ring edges stay paired with the
-   annulus. */
-function wallWithFixator(A, B, t, r, dir, emit) {
+   annulus. Textured pieces pass extraPts — exact 3D boundary points
+   (sub-resolution marks) that neighboring mesh elements share. */
+function wallWithFixator(A, B, t, r, dir, emit, extraPts) {
   const ex = B[0] - A[0], ey = B[1] - A[1];
   const el = Math.hypot(ex, ey);
   const ux = ex / el, uy = ey / el;
@@ -100,7 +101,12 @@ function wallWithFixator(A, B, t, r, dir, emit) {
     const th = (Math.atan2(sb * t / 2, sa * el / 2) + 2 * Math.PI) % (2 * Math.PI);
     return { ang: th, pt: cornerPts[sa + ',' + sb], isR: false };
   });
-  const events = ring.concat(corners).sort((a, b) => a.ang - b.ang);
+  const extra = (extraPts || []).map(pt => {
+    const a = (pt[0] - C[0]) * ux + (pt[1] - C[1]) * uy;
+    const b = pt[2] - t / 2;
+    return { ang: (Math.atan2(b, a) + 2 * Math.PI) % (2 * Math.PI), pt, isR: false };
+  });
+  const events = ring.concat(corners, extra).sort((a, b) => a.ang - b.ang);
   let lastR = null, lastB = null;
   for (let q = events.length - 1; q >= 0 && (!lastR || !lastB); q--) {
     if (events[q].isR && !lastR) lastR = events[q].pt;
@@ -130,6 +136,132 @@ function wallWithFixator(A, B, t, r, dir, emit) {
       }
       prev = row;
     }
+  }
+}
+
+/* ---------- Textured pieces: sub-resolution relief mesh ----------
+   The outer surface becomes a heightfield over TEXT_SUB subpixels per
+   cell: 0 (plain), +dep (engraved pocket) or −dep (embossed letter).
+   The solid is three voxel layers — C [−dep,0] (letters), A [0,dep]
+   (skin minus pockets), B [dep,t] (body) — meshed as boundary faces on
+   a shared lattice, so everything pairs exactly. Fixator walls keep
+   their disk stitch, with sub-resolution marks added to the boundary. */
+function buildTexturedPieceMesh(piece, model, c, t, clearance, emit) {
+  const SUB = TEXT_SUB, ss = c / SUB, dep = TEXT_DEP * c;
+  const cfg = model.textMasks[piece.face];
+  const NS = model.N * SUB;
+  const eng = cfg.style !== 'emb';
+  const cellSet = new Set(piece.cells.map(p => p[0] + ',' + p[1]));
+  const inPiece = (sx, sy) => sx >= 0 && sy >= 0 &&
+    cellSet.has(((sx / SUB) | 0) + ',' + ((sy / SUB) | 0));
+  const txt = (sx, sy) => sx >= 0 && sy >= 0 && sx < NS && sy < NS &&
+    inPiece(sx, sy) && cfg.data[sy * NS + sx] === 1;
+  // layers, outer side first (z=0 is the cube's outer surface)
+  const layers = [
+    { z0: -dep, z1: 0, has: (x, y) => !eng && txt(x, y) },
+    { z0: 0, z1: dep, has: (x, y) => inPiece(x, y) && !(eng && txt(x, y)) },
+    { z0: dep, z1: t, has: (x, y) => inPiece(x, y) },
+  ];
+
+  // displaced boundary sub-vertices (bit-exact shared positions)
+  const unit = piece.outline;
+  const mm = unit.map(p => [p[0] * c, p[1] * c]);
+  const disp = clearance > 0 ? offsetVerts(mm, clearance) : mm;
+  const bpos = new Map();
+  const nOut = unit.length;
+  for (let k = 0; k < nOut; k++) {
+    const P0 = unit[k], P1 = unit[(k + 1) % nOut];
+    const D0 = disp[k], D1 = disp[(k + 1) % nOut];
+    for (let q = 0; q <= SUB; q++) {
+      const f = q / SUB;
+      const gx = P0[0] * SUB + (P1[0] - P0[0]) * q;
+      const gy = P0[1] * SUB + (P1[1] - P0[1]) * q;
+      bpos.set(gx + ',' + gy, [D0[0] + (D1[0] - D0[0]) * f, D0[1] + (D1[1] - D0[1]) * f]);
+    }
+  }
+  const P = (gx, gy) => bpos.get(gx + ',' + gy) || [gx * ss, gy * ss];
+  const tri = (a, b, cc) => emit(a[0], a[1], a[2], b[0], b[1], b[2], cc[0], cc[1], cc[2]);
+  const quadH = (sx, sy, z, up) => {
+    const a = P(sx, sy), b = P(sx + 1, sy), d = P(sx + 1, sy + 1), e = P(sx, sy + 1);
+    if (up) { tri([a[0], a[1], z], [b[0], b[1], z], [d[0], d[1], z]); tri([a[0], a[1], z], [d[0], d[1], z], [e[0], e[1], z]); }
+    else { tri([a[0], a[1], z], [d[0], d[1], z], [b[0], b[1], z]); tri([a[0], a[1], z], [e[0], e[1], z], [d[0], d[1], z]); }
+  };
+  // lateral wall on the sub-edge G0→G1 (CCW around the present subcell)
+  const quadW = (G0, G1, z0, z1) => {
+    const a = P(G0[0], G0[1]), b = P(G1[0], G1[1]);
+    tri([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], z1]);
+    tri([a[0], a[1], z0], [b[0], b[1], z1], [a[0], a[1], z1]);
+  };
+
+  // sub-edges covered by fixator walls (their layers A+B are stitched)
+  const fixEdges = new Set();
+  const fixUnit = [];
+  if (piece.feats) {
+    for (const [k, type] of piece.feats) {
+      fixUnit.push({ k, type });
+      const P0 = unit[k], P1 = unit[(k + 1) % nOut];
+      for (let q = 0; q < SUB; q++) {
+        const g0 = [P0[0] * SUB + (P1[0] - P0[0]) * q, P0[1] * SUB + (P1[1] - P0[1]) * q];
+        const g1 = [P0[0] * SUB + (P1[0] - P0[0]) * (q + 1), P0[1] * SUB + (P1[1] - P0[1]) * (q + 1)];
+        const key = g0[0] < g1[0] || (g0[0] === g1[0] && g0[1] < g1[1])
+          ? g0.join(',') + '|' + g1.join(',') : g1.join(',') + '|' + g0.join(',');
+        fixEdges.add(key);
+      }
+    }
+  }
+  const onFixWall = (G0, G1) => {
+    const key = G0[0] < G1[0] || (G0[0] === G1[0] && G0[1] < G1[1])
+      ? G0.join(',') + '|' + G1.join(',') : G1.join(',') + '|' + G0.join(',');
+    return fixEdges.has(key);
+  };
+
+  // bounding box of the piece in subcells
+  let cx0 = Infinity, cy0 = Infinity, cx1 = -Infinity, cy1 = -Infinity;
+  for (const [ci, cj] of piece.cells) {
+    cx0 = Math.min(cx0, ci); cy0 = Math.min(cy0, cj);
+    cx1 = Math.max(cx1, ci); cy1 = Math.max(cy1, cj);
+  }
+  for (let sy = cy0 * SUB; sy < (cy1 + 1) * SUB; sy++) {
+    for (let sx = cx0 * SUB; sx < (cx1 + 1) * SUB; sx++) {
+      for (let li = 0; li < 3; li++) {
+        const L = layers[li];
+        if (!L.has(sx, sy)) continue;
+        // horizontal faces
+        const below = li > 0 ? layers[li - 1] : null;
+        if (!below || !below.has(sx, sy)) quadH(sx, sy, L.z0, false);
+        const above = li < 2 ? layers[li + 1] : null;
+        if (!above) quadH(sx, sy, L.z1, true);
+        else if (!above.has(sx, sy)) quadH(sx, sy, L.z1, true);
+        // lateral faces, CCW edge per direction (matches traceOutline)
+        const sides = [
+          [sx + 1, sy, [sx + 1, sy], [sx + 1, sy + 1]],     // +x
+          [sx - 1, sy, [sx, sy + 1], [sx, sy]],             // −x
+          [sx, sy + 1, [sx + 1, sy + 1], [sx, sy + 1]],     // +y
+          [sx, sy - 1, [sx, sy], [sx + 1, sy]],             // −y
+        ];
+        for (const [nx, ny, G0, G1] of sides) {
+          if (L.has(nx, ny)) continue;
+          if (L.z0 >= 0 && onFixWall(G0, G1)) continue; // A+B covered by the disk wall
+          quadW(G0, G1, L.z0, L.z1);
+        }
+      }
+    }
+  }
+
+  // fixator walls with sub-resolution boundary marks
+  const r = FIX_R * c;
+  for (const { k, type } of fixUnit) {
+    const A = disp[k], B = disp[(k + 1) % nOut];
+    const P0 = unit[k], P1 = unit[(k + 1) % nOut];
+    const marks = [];
+    for (let q = 1; q < SUB; q++) {
+      const gx = P0[0] * SUB + (P1[0] - P0[0]) * q;
+      const gy = P0[1] * SUB + (P1[1] - P0[1]) * q;
+      const p2 = P(gx, gy);
+      marks.push([p2[0], p2[1], 0], [p2[0], p2[1], t]);
+    }
+    marks.push([A[0], A[1], dep], [B[0], B[1], dep]); // side cuts of layer A|B
+    wallWithFixator(A, B, t, r, type === 'bump' ? 1 : -1, emit, marks);
   }
 }
 
@@ -163,13 +295,18 @@ function buildSTL(coords) {
 
 // STL for one plate. Flat pieces translate by (dx,dy); tilted pieces are
 // rotated 45°×45° and each dropped so its own lowest point touches the bed.
+// In flat mode the pieces of embossed-text faces are rotated 180° about X
+// (printed outer-face-up), so the raised letters do not end up under the
+// piece on the bed.
 function plateSTL(plate, model) {
   const coords = [];
   const c = model.c, t = model.t;
   for (const pc of plate.pieces) {
     const local = [];
     const emit = (...v) => local.push(...v);
-    buildPieceMesh(pc.piece, c, t, plate.clearance || 0, emit);
+    const cfg = model.textMasks ? model.textMasks[pc.piece.face] : null;
+    if (cfg && pc.piece.hasText) buildTexturedPieceMesh(pc.piece, model, c, t, plate.clearance || 0, emit);
+    else buildPieceMesh(pc.piece, c, t, plate.clearance || 0, emit);
     if (pc.tilt) {
       let zmin = Infinity;
       const tv = [];
@@ -179,6 +316,19 @@ function plateSTL(plate, model) {
         if (v[2] < zmin) zmin = v[2];
       }
       for (const v of tv) coords.push(v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - zmin);
+    } else if (cfg && cfg.style === 'emb') {
+      // rotate 180° about the X axis through the piece's own bbox center
+      let ymin = Infinity, ymax = -Infinity, zmax = -Infinity;
+      for (let k = 0; k < local.length; k += 3) {
+        if (local[k + 1] < ymin) ymin = local[k + 1];
+        if (local[k + 1] > ymax) ymax = local[k + 1];
+        if (local[k + 2] > zmax) zmax = local[k + 2];
+      }
+      const yc = ymin + ymax;
+      // diag(1,−1,−1) is a proper rotation — vertex order stays as is
+      for (let k = 0; k < local.length; k += 3) {
+        coords.push(local[k] + pc.dx, yc - local[k + 1] + pc.dy, zmax - local[k + 2]);
+      }
     } else {
       for (let k = 0; k < local.length; k += 3) {
         coords.push(local[k] + pc.dx, local[k + 1] + pc.dy, local[k + 2]);

@@ -37,19 +37,27 @@ const DOVETAIL = 0;
 const FIX_R = 0.15;
 const FIX_SINK = 0.45;
 
+/* Face text: rasterized at TEXT_SUB subpixels per cell and turned into a
+   relief on the outer surface — engraved pockets or embossed letters of
+   TEXT_DEP·cell depth/height. Text stays at least one cell away from the
+   face rim (edge teeth belong to the neighboring face's plane). */
+const TEXT_SUB = 6;
+const TEXT_DEP = 0.2;
+
 function pieceCount(d) { return 12 * d * d; }
 
 function buildPuzzle(params) {
   const { difficulty: d, colors, L, seed } = params;
+  const textMasks = params.textMasks || null;
   const N = CELL * d;
   const c = L / N; // cell size, mm (= plate thickness)
   let built = null, attempt = 0;
   for (; attempt < 100; attempt++) {
-    built = tryBuild(d, N, makeRng(seed + '|' + d + '|' + attempt), false);
+    built = tryBuild(d, N, makeRng(seed + '|' + d + '|' + attempt), false, textMasks);
     if (built) break;
   }
   if (!built) { // last resort: drop the uniqueness requirement
-    for (let a = 0; a < 50 && !built; a++) built = tryBuild(d, N, makeRng(seed + '|' + d + '|fb' + a), true);
+    for (let a = 0; a < 50 && !built; a++) built = tryBuild(d, N, makeRng(seed + '|' + d + '|fb' + a), true, textMasks);
   }
   if (!built) throw new Error('Failed to generate a valid cutting — try another seed');
 
@@ -128,11 +136,33 @@ function buildPuzzle(params) {
     byName[el.face].pieces.push(piece);
     pieces.push(piece);
   }
+  // per-piece text presence (drives the mesh path and flat-mode flipping);
+  // the sanitized masks from the successful attempt are the real ones
+  const finalMasks = built.textMasks;
+  if (finalMasks) {
+    const NS = N * TEXT_SUB;
+    for (const piece of pieces) {
+      const cfg = finalMasks[piece.face];
+      piece.hasText = false;
+      if (!cfg) continue;
+      outer:
+      for (const [ci, cj] of piece.cells) {
+        for (let sy = cj * TEXT_SUB; sy < (cj + 1) * TEXT_SUB; sy++) {
+          for (let sx = ci * TEXT_SUB; sx < (ci + 1) * TEXT_SUB; sx++) {
+            if (cfg.data[sy * NS + sx]) { piece.hasText = true; break outer; }
+          }
+        }
+      }
+    }
+  }
+
   const model = {
     L, c, t: c, N, difficulty: d, faces, pieces,
     adjacency: built.adjacency,
     unique: built.unique,
     attempts: attempt + 1,
+    textMasks: finalMasks,
+    SUB: TEXT_SUB,
   };
   if (colors === 4) colorize(model, makeRng(seed + '|colors|' + d));
   return model;
@@ -140,7 +170,7 @@ function buildPuzzle(params) {
 
 /* One generation attempt. Returns null when the layout could not be
    made valid (the caller retries with another randomness stream). */
-function tryBuild(d, N, rng, force) {
+function tryBuild(d, N, rng, force, textMasks) {
   const NF = FACE_DEFS.length;
   const perFace = 2 * d * d;
 
@@ -518,18 +548,89 @@ function tryBuild(d, N, rng, force) {
           if (!pairWallsQ.has(pk)) pairWallsQ.set(pk, []);
           pairWallsQ.get(pk).push({ fk, ...wall });
         };
-        if (i + 1 < N) consider(i + 1, j, { x: i + 1, y: j + 0.5, vert: 1 });
-        if (j + 1 < N) consider(i, j + 1, { x: i + 0.5, y: j + 1, vert: 0 });
+        if (i + 1 < N) consider(i + 1, j, { fi, x: i + 1, y: j + 0.5, vert: 1 });
+        if (j + 1 < N) consider(i, j + 1, { fi, x: i + 0.5, y: j + 1, vert: 0 });
       }
     }
   }
+  /* Sanitize the text masks against the final ownership: a pocket/letter
+     region that touches itself only diagonally (within one piece's skin
+     or letter layer) would create a non-manifold edge in the relief
+     mesh. Diagonal pinches are patched by filling the anti-diagonal
+     subcell of the same piece (or clearing a pixel when impossible). */
+  let masks = null;
+  if (textMasks) {
+    masks = {};
+    for (const [fn, cfg] of Object.entries(textMasks)) {
+      masks[fn] = { data: Uint8Array.from(cfg.data), style: cfg.style };
+    }
+    const NS = N * TEXT_SUB;
+    for (const [fn, cfg] of Object.entries(masks)) {
+      const fi = faceIdx[fn];
+      if (fi === undefined) continue;
+      const dat = cfg.data;
+      const ownS = (sx, sy) => owner(fi, (sx / TEXT_SUB) | 0, (sy / TEXT_SUB) | 0);
+      let changed = true, guard = 0;
+      while (changed && guard++ < 12) {
+        changed = false;
+        for (let y = 0; y < NS - 1; y++) {
+          for (let x = 0; x < NS - 1; x++) {
+            // block cells: 0=(x,y) 1=(x+1,y) 2=(x,y+1) 3=(x+1,y+1)
+            const xs = [x, x + 1, x, x + 1], ys = [y, y, y + 1, y + 1];
+            const ids = [ownS(x, y), ownS(x + 1, y), ownS(x, y + 1), ownS(x + 1, y + 1)];
+            const tb = xs.map((sx, k) => dat[ys[k] * NS + sx]);
+            for (const P of new Set(ids)) {
+              for (const want of [1, 0]) {
+                const inCls = k => ids[k] === P && tb[k] === want;
+                for (const [d1, d2, o1, o2] of [[0, 3, 1, 2], [1, 2, 0, 3]]) {
+                  if (inCls(d1) && inCls(d2) && !inCls(o1) && !inCls(o2)) {
+                    const fix = [o1, o2].find(k => ids[k] === P);
+                    const k2 = fix !== undefined ? fix : d1;
+                    const val = fix !== undefined ? want : (want ? 0 : 1);
+                    dat[ys[k2] * NS + xs[k2]] = val;
+                    tb[k2] = val;
+                    changed = true;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   /* Load-bearing walls only. Pulling two pieces apart happens across the
      contact's principal direction; a hemisphere on a wall FACING that
      pull slides straight out of its socket and carries nothing (shear
      along the seam is already blocked by the teeth themselves). Only
      walls whose normal runs ALONG the contact — the tooth flanks — force
      the bump to climb out of the socket, so only they get fixators:
-     one near the middle of the seam, a second on long contacts. */
+     one near the middle of the seam, a second on long contacts.
+     Walls whose rim subcells carry face text are excluded — the fixator
+     disk needs a clean rectangular wall to stitch into. */
+  const texty = (w) => {
+    if (!masks) return false;
+    const cfg = masks[FACE_DEFS[w.fi].name];
+    if (!cfg) return false;
+    const NS = N * TEXT_SUB;
+    const hit = (sx, sy) =>
+      sx >= 0 && sy >= 0 && sx < NS && sy < NS && cfg.data[sy * NS + sx] === 1;
+    if (w.vert) {
+      const j = w.y - 0.5;
+      for (let q = 0; q < TEXT_SUB; q++) {
+        const sy = j * TEXT_SUB + q;
+        if (hit(w.x * TEXT_SUB - 1, sy) || hit(w.x * TEXT_SUB, sy)) return true;
+      }
+    } else {
+      const i = w.x - 0.5;
+      for (let q = 0; q < TEXT_SUB; q++) {
+        const sx = i * TEXT_SUB + q;
+        if (hit(sx, w.y * TEXT_SUB - 1) || hit(sx, w.y * TEXT_SUB)) return true;
+      }
+    }
+    return false;
+  };
   const fixators = new Map(); // fk → bump owner element id
   for (const pk of [...pairWallsQ.keys()].sort()) {
     const ws = pairWallsQ.get(pk);
@@ -540,8 +641,9 @@ function tryBuild(d, N, rng, force) {
       if (w.y < yMin) yMin = w.y; if (w.y > yMax) yMax = w.y;
     }
     const principalX = (xMax - xMin) >= (yMax - yMin);
-    let useful = ws.filter(w => (principalX ? w.vert === 1 : w.vert === 0));
-    if (!useful.length) useful = ws; // incidental 1-wall contacts etc.
+    let useful = ws.filter(w => (principalX ? w.vert === 1 : w.vert === 0) && !texty(w));
+    if (!useful.length) useful = ws.filter(w => !texty(w));
+    if (!useful.length) continue; // весь контакт под текстом — пара держится формой
     useful.sort((a, b) => principalX ? (a.x - b.x || a.y - b.y) : (a.y - b.y || a.x - b.x));
     let picks;
     if (ws.length >= 8 && useful.length >= 2) {
@@ -588,6 +690,7 @@ function tryBuild(d, N, rng, force) {
   }
   return {
     elements, adjacency: adj.map(s => [...s]), unique, fixators,
+    textMasks: masks,
     canonKeyOf: (fi, i, j) => canonOf(key(fi, i, j)),
     ownerAt: (fi, i, j) => (i < 0 || j < 0 || i >= N || j >= N) ? -1 : owner(fi, i, j),
   };

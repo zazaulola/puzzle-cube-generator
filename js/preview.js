@@ -55,6 +55,36 @@ function drawNet(canvas, model, palette, colorsCount) {
       ctx.stroke();
     }
   }
+  // face text relief (engraved darker, embossed lighter)
+  if (model.textMasks) {
+    const NS = model.N * TEXT_SUB;
+    ctx.imageSmoothingEnabled = false;
+    for (const f of model.faces) {
+      const cfg = model.textMasks[f.name];
+      if (!cfg) continue;
+      const off = document.createElement('canvas');
+      off.width = NS; off.height = NS;
+      const octx = off.getContext('2d');
+      const img = octx.createImageData(NS, NS);
+      const [rr, gg, bb, aa] = cfg.style === 'emb' ? [255, 255, 255, 145] : [10, 14, 18, 150];
+      for (let i = 0; i < NS * NS; i++) {
+        if (!cfg.data[i]) continue;
+        img.data[i * 4] = rr; img.data[i * 4 + 1] = gg;
+        img.data[i * 4 + 2] = bb; img.data[i * 4 + 3] = aa;
+      }
+      octx.putImageData(img, 0, 0);
+      const [gx, gy] = NET_LAYOUT[f.name];
+      const ox = pad + gx * cell + 3;
+      const oy = pad + (2 - gy) * cell + 3 + model.L * s;
+      ctx.save();
+      ctx.translate(ox, oy);
+      ctx.scale(1, -1); // face v axis points up
+      ctx.drawImage(off, 0, 0, NS, NS, 0, 0, model.L * s, model.L * s);
+      ctx.restore();
+    }
+    ctx.imageSmoothingEnabled = true;
+  }
+
   // hidden hemisphere fixators: dot = bump, ring = socket, on a separate
   // overlay canvas — CSS keeps it hidden unless body.debug is set
   const fixCv = document.getElementById('net-fix');

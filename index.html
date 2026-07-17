@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <meta name="theme-color" content="#12171d">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -91,6 +91,31 @@
     <p class="note" data-i18n="orientNote">45°: both piece sides print alike; supports required</p>
   </section>
 
+  <section class="ctrl">
+    <label class="ctrl-label" data-i18n="textSection">Text on faces</label>
+    <div class="seg seg-mini" id="seg-textface">
+      <button data-v="F" class="on" data-i18n="face_F">Front</button>
+      <button data-v="R" data-i18n="face_R">Right</button>
+      <button data-v="B" data-i18n="face_B">Back</button>
+      <button data-v="L" data-i18n="face_L">Left</button>
+      <button data-v="T" data-i18n="face_T">Top</button>
+      <button data-v="Bo" data-i18n="face_Bo">Bottom</button>
+    </div>
+    <textarea id="inp-text" class="num txt" rows="2" spellcheck="false"></textarea>
+    <div class="text-opts">
+      <div class="seg seg-mini" id="seg-th">
+        <button data-v="l">⇤</button><button data-v="c" class="on">↔</button><button data-v="r">⇥</button>
+      </div>
+      <div class="seg seg-mini" id="seg-tv">
+        <button data-v="t">⤒</button><button data-v="m" class="on">↕</button><button data-v="b">⤓</button>
+      </div>
+      <div class="seg seg-mini" id="seg-ts">
+        <button data-v="eng" class="on" data-i18n="tsEng">engraved</button>
+        <button data-v="emb" data-i18n="tsEmb">embossed</button>
+      </div>
+    </div>
+  </section>
+
   <div id="warnings"></div>
 
   <section class="ctrl files">
@@ -133,12 +158,12 @@
   </div>
 </main>
 
-<script src="js/i18n.js?v=33"></script>
-<script src="js/geometry.js?v=33"></script>
-<script src="js/pieces.js?v=33"></script>
-<script src="js/layout.js?v=33"></script>
-<script src="js/stl.js?v=33"></script>
-<script src="js/preview.js?v=33"></script>
-<script src="js/app.js?v=33"></script>
+<script src="js/i18n.js?v=34"></script>
+<script src="js/geometry.js?v=34"></script>
+<script src="js/pieces.js?v=34"></script>
+<script src="js/layout.js?v=34"></script>
+<script src="js/stl.js?v=34"></script>
+<script src="js/preview.js?v=34"></script>
+<script src="js/app.js?v=34"></script>
 </body>
 </html>

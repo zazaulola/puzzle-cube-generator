@@ -25,6 +25,8 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 | Max cell | mm, default 6 | caps the piece size in auto mode — the cell equals the piece thickness, and bigger cells print much longer |
 | Seed | text | deterministic: the same seed always yields the same cutting |
 
+**Text on faces**: any face can carry a multi-line inscription — engraved (pockets) or embossed (raised letters) — with 3×3 alignment options. Text is rasterized into the same pixel aesthetic (6 subpixels per cell, depth 0.2 cell), gets split across the puzzle pieces, keeps one cell clear of the cube edges, and travels inside the share link. In flat print mode the pieces of embossed faces are automatically flipped face-up so the letters are not squashed against the bed.
+
 Every configuration has a **shareable link**: the URL hash encodes the whole quest (`#d=2&c=4&k=1&o=flat&m=6&seed=…`) — the 🔗 button copies it, and opening such a link restores the exact same puzzle. Appending `&dbg=1` (or `?debug`) reveals the hidden fixator markers on the net preview: dot = bump, ring = socket.
 
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.
