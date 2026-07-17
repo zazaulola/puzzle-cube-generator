@@ -147,7 +147,7 @@ function wallWithFixator(A, B, t, r, dir, emit, extraPts) {
    a shared lattice, so everything pairs exactly. Fixator walls keep
    their disk stitch, with sub-resolution marks added to the boundary. */
 function buildTexturedPieceMesh(piece, model, c, t, clearance, emit) {
-  const SUB = TEXT_SUB, ss = c / SUB, dep = TEXT_DEP * c;
+  const SUB = model.SUB || TEXT_SUB, ss = c / SUB, dep = TEXT_DEP * c;
   const cfg = model.textMasks[piece.face];
   const NS = model.N * SUB;
   const eng = cfg.style !== 'emb';

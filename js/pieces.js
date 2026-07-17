@@ -40,8 +40,12 @@ const FIX_SINK = 0.45;
 /* Face text: rasterized at TEXT_SUB subpixels per cell and turned into a
    relief on the outer surface — engraved pockets or embossed letters of
    TEXT_DEP·cell depth/height. Text stays at least one cell away from the
-   face rim (edge teeth belong to the neighboring face's plane). */
-const TEXT_SUB = 6;
+   face rim (edge teeth belong to the neighboring face's plane).
+   TEXT_SUB is adaptive: the app raises it on low difficulties so the
+   subpixel stays near the nozzle width (~0.42 mm) — at d=1 a 6-subpixel
+   grid is only 48×48 for the whole face and letters turn to mush.
+   Models remember their own SUB (model.SUB). */
+let TEXT_SUB = 6;
 const TEXT_DEP = 0.2;
 
 function pieceCount(d) { return 12 * d * d; }

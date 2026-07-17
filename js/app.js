@@ -24,13 +24,45 @@ const state = {
 };
 
 /* ---------- Face text rasterization (browser canvas) ---------- */
+
+/* Text fonts. Webfonts (Google Fonts, loaded in index.html) are checked
+   against the actual text so the cyrillic subsets get pulled in too;
+   until a font arrives the text rasterizes with the fallback and the
+   model regenerates once the real font is ready. */
+const TEXT_FONTS = {
+  f0: { css: px => `900 ${px}px Arial, sans-serif`, probe: null },
+  f1: { css: px => `${px}px Lobster, cursive`, probe: '32px Lobster' },
+  f2: { css: px => `700 ${px}px Caveat, cursive`, probe: '700 32px Caveat' },
+  f3: { css: px => `800 ${px}px "Playfair Display", serif`, probe: '800 32px "Playfair Display"' },
+};
+const _fontTried = {};
+function ensureFont(fk, sample) {
+  const F = TEXT_FONTS[fk];
+  if (!F || !F.probe || !document.fonts) return;
+  try {
+    if (document.fonts.check(F.probe, sample)) return;
+    if (_fontTried[fk]) return; // one attempt per session — avoid regen loops
+    _fontTried[fk] = 1;
+    document.fonts.load(F.probe, sample).then(() => {
+      if (document.fonts.check(F.probe, sample)) regenerate();
+    });
+  } catch (e) { /* offline / no FontFaceSet — fallback font is fine */ }
+}
+
 function rasterizeTexts(N) {
+  // Adaptive raster resolution: keep the subpixel near the nozzle width
+  // (~0.42 mm) instead of a fixed 6/cell — at difficulty 1 a 48×48 grid
+  // turns letters to mush. Capped so the face raster stays ≤ 192².
+  const cExp = state.autoEdge ? state.maxCell : (state.baseEdge * state.scale) / N;
+  TEXT_SUB = Math.max(6, Math.min(Math.floor(cExp / 0.42), Math.floor(192 / N)));
   const SUB = TEXT_SUB, NS = N * SUB;
   const out = {};
   for (const [face, cfg] of Object.entries(state.texts)) {
     const lines = (cfg.t || '').replace(/\r/g, '').split('\n')
       .map(s => s.slice(0, 32)).slice(0, 6);
     if (!lines.join('').trim()) continue;
+    const font = TEXT_FONTS[cfg.f] || TEXT_FONTS.f0;
+    ensureFont(cfg.f, lines.join(''));
     const cv = document.createElement('canvas');
     cv.width = NS; cv.height = NS;
     const ctx = cv.getContext('2d', { willReadFrequently: true });
@@ -38,12 +70,12 @@ function rasterizeTexts(N) {
     const availW = NS - 2 * m, availH = NS - 2 * m;
     let px = Math.max(5, Math.floor(availH / lines.length / 1.2));
     for (let iter = 0; iter < 8; iter++) {
-      ctx.font = `900 ${px}px Arial, sans-serif`;
+      ctx.font = font.css(px);
       const wMax = Math.max(...lines.map(s => ctx.measureText(s).width), 1);
       if (wMax <= availW || px <= 5) break;
       px = Math.max(5, Math.floor(px * availW / wMax));
     }
-    ctx.font = `900 ${px}px Arial, sans-serif`;
+    ctx.font = font.css(px);
     const lineH = px * 1.2;
     const blockH = lines.length * lineH;
     const y0 = cfg.v === 't' ? m : cfg.v === 'b' ? NS - m - blockH : (NS - blockH) / 2;
@@ -58,7 +90,9 @@ function rasterizeTexts(N) {
       for (let xx = 0; xx < NS; xx++) {
         // hard guarantee: nothing within the rim cell band
         if (xx < SUB || y < SUB || xx >= NS - SUB || y >= NS - SUB) continue;
-        if (img[(y * NS + xx) * 4 + 3] > 128) {
+        // 100 (not 128): calligraphic strokes are thinner and antialiased —
+        // a slightly lower threshold keeps hairline parts printable
+        if (img[(y * NS + xx) * 4 + 3] > 100) {
           data[(NS - 1 - y) * NS + xx] = 1; // face v axis points up
           any = true;
         }
@@ -82,7 +116,7 @@ function stateToHash() {
   if (state.palette.join() !== DEFAULT_PALETTE.join())
     p.set('pal', state.palette.map(x => x.replace('#', '')).join('.'));
   for (const [face, cfg] of Object.entries(state.texts)) {
-    if ((cfg.t || '').trim()) p.set('x' + face, [cfg.s, cfg.h, cfg.v, cfg.t].join('.'));
+    if ((cfg.t || '').trim()) p.set('x' + face, [cfg.s, cfg.h, cfg.v, cfg.f || 'f0', cfg.t].join('.'));
   }
   if (document.body.classList.contains('debug')) p.set('dbg', '1');
   return p.toString();
@@ -122,8 +156,11 @@ function applyHash() {
     const s = seg[0] === 'emb' ? 'emb' : 'eng';
     const h = ['l', 'c', 'r'].includes(seg[1]) ? seg[1] : 'c';
     const v = ['t', 'm', 'b'].includes(seg[2]) ? seg[2] : 'm';
-    const txt = seg.slice(3).join('.').slice(0, 200);
-    if (txt.trim()) state.texts[f] = { t: txt, h, v, s };
+    // new links carry the font as the 4th field; old ones start text there
+    const hasFont = seg.length >= 5 && /^f[0-3]$/.test(seg[3]);
+    const fnt = hasFont ? seg[3] : 'f0';
+    const txt = seg.slice(hasFont ? 4 : 3).join('.').slice(0, 200);
+    if (txt.trim()) state.texts[f] = { t: txt, h, v, s, f: fnt };
   }
   if (p.get('dbg') === '1') document.body.classList.add('debug');
   return true;
@@ -148,7 +185,7 @@ function syncUI() {
 
 /* ---------- Face text controls ---------- */
 let curTextFace = 'F';
-const textCfg = f => state.texts[f] || { t: '', h: 'c', v: 'm', s: 'eng' };
+const textCfg = f => state.texts[f] || { t: '', h: 'c', v: 'm', s: 'eng', f: 'f0' };
 function loadTextUI() {
   const cfg = textCfg(curTextFace);
   $('#inp-text').value = cfg.t;
@@ -156,6 +193,7 @@ function loadTextUI() {
   syncSeg('#seg-th', cfg.h);
   syncSeg('#seg-tv', cfg.v);
   syncSeg('#seg-ts', cfg.s);
+  syncSeg('#seg-tf', cfg.f || 'f0');
   // отметка граней с текстом
   $$('#seg-textface button').forEach(b =>
     b.classList.toggle('has', !!(state.texts[b.dataset.v] || {}).t));
@@ -164,7 +202,7 @@ function saveTextUI() {
   const t2 = $('#inp-text').value.replace(/\r/g, '').slice(0, 200);
   const pick = sel => ($(sel + ' button.on') || $(sel + ' button')).dataset.v;
   if (t2.trim()) {
-    state.texts[curTextFace] = { t: t2, h: pick('#seg-th'), v: pick('#seg-tv'), s: pick('#seg-ts') };
+    state.texts[curTextFace] = { t: t2, h: pick('#seg-th'), v: pick('#seg-tv'), s: pick('#seg-ts'), f: pick('#seg-tf') };
   } else {
     delete state.texts[curTextFace];
   }
@@ -463,7 +501,7 @@ function init() {
     clearTimeout(textTimer);
     textTimer = setTimeout(saveTextUI, 450);
   });
-  for (const sel of ['#seg-th', '#seg-tv', '#seg-ts']) {
+  for (const sel of ['#seg-th', '#seg-tv', '#seg-ts', '#seg-tf']) {
     $$(sel + ' button').forEach(b => {
       b.addEventListener('click', () => {
         $$(sel + ' button').forEach(x => x.classList.toggle('on', x === b));

@@ -93,6 +93,8 @@ body {
 .seg-mini button.has { box-shadow: inset 0 -2px 0 var(--accent-2); }
 .txt { margin-top: 8px; resize: vertical; min-height: 42px; line-height: 1.35; }
 .text-opts { display: flex; gap: 6px; margin-top: 8px; }
+.seg-fonts { margin-top: 8px; }
+.seg-fonts button { font-size: 16px; text-transform: none; letter-spacing: 0; padding: 4px 2px; }
 .text-opts .seg { flex: 1; }
 .text-opts #seg-ts { flex: 1.6; }
 

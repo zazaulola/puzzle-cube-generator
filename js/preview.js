@@ -57,7 +57,7 @@ function drawNet(canvas, model, palette, colorsCount) {
   }
   // face text relief (engraved darker, embossed lighter)
   if (model.textMasks) {
-    const NS = model.N * TEXT_SUB;
+    const NS = model.N * (model.SUB || TEXT_SUB);
     ctx.imageSmoothingEnabled = false;
     for (const f of model.faces) {
       const cfg = model.textMasks[f.name];
