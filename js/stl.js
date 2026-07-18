@@ -145,8 +145,19 @@ function wallWithFixator(A, B, t, r, dir, emit, extraPts) {
    The solid is three voxel layers — C [−dep,0] (letters), A [0,dep]
    (skin minus pockets), B [dep,t] (body) — meshed as boundary faces on
    a shared lattice, so everything pairs exactly. Fixator walls keep
-   their disk stitch, with sub-resolution marks added to the boundary. */
-function buildTexturedPieceMesh(piece, model, c, t, clearance, emit) {
+   their disk stitch, with sub-resolution marks added to the boundary.
+   The lattice is built with the relief around z≈0, then mirrored
+   z→t−z at emit time (winding flipped): the relief must sit on the
+   z=t side, because z=t is the face the viewer sees — the mask reads
+   correctly from +z, and a mirror is the only way to change which side
+   the text is legible from (no print-bed rotation can fix chirality).
+   With the relief up, the assembled cube matches the net preview
+   exactly, and in flat mode both text styles print letters-up. */
+function buildTexturedPieceMesh(piece, model, c, t, clearance, emitRaw) {
+  // z-mirror about the slab + winding flip; identical input floats give
+  // identical outputs, so bit-exact vertex sharing survives the mirror
+  const emit = (ax, ay, az, bx, by, bz, gx, gy, gz) =>
+    emitRaw(ax, ay, t - az, gx, gy, t - gz, bx, by, t - bz);
   const SUB = model.SUB || TEXT_SUB, ss = c / SUB, dep = TEXT_DEP * c;
   const cfg = model.textMasks[piece.face];
   const NS = model.N * SUB;
@@ -156,7 +167,7 @@ function buildTexturedPieceMesh(piece, model, c, t, clearance, emit) {
     cellSet.has(((sx / SUB) | 0) + ',' + ((sy / SUB) | 0));
   const txt = (sx, sy) => sx >= 0 && sy >= 0 && sx < NS && sy < NS &&
     inPiece(sx, sy) && cfg.data[sy * NS + sx] === 1;
-  // layers, outer side first (z=0 is the cube's outer surface)
+  // layers, relief side first (mirrored to z=t — the outer surface — at emit)
   const layers = [
     { z0: -dep, z1: 0, has: (x, y) => !eng && txt(x, y) },
     { z0: 0, z1: dep, has: (x, y) => inPiece(x, y) && !(eng && txt(x, y)) },
@@ -295,9 +306,8 @@ function buildSTL(coords) {
 
 // STL for one plate. Flat pieces translate by (dx,dy); tilted pieces are
 // rotated 45°×45° and each dropped so its own lowest point touches the bed.
-// In flat mode the pieces of embossed-text faces are rotated 180° about X
-// (printed outer-face-up), so the raised letters do not end up under the
-// piece on the bed.
+// Textured pieces carry their relief on the z=t (top) side, so in flat
+// mode both engraved and embossed text print letters-up as is.
 function plateSTL(plate, model) {
   const coords = [];
   const c = model.c, t = model.t;
@@ -316,19 +326,6 @@ function plateSTL(plate, model) {
         if (v[2] < zmin) zmin = v[2];
       }
       for (const v of tv) coords.push(v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - zmin);
-    } else if (cfg && cfg.style === 'emb') {
-      // rotate 180° about the X axis through the piece's own bbox center
-      let ymin = Infinity, ymax = -Infinity, zmax = -Infinity;
-      for (let k = 0; k < local.length; k += 3) {
-        if (local[k + 1] < ymin) ymin = local[k + 1];
-        if (local[k + 1] > ymax) ymax = local[k + 1];
-        if (local[k + 2] > zmax) zmax = local[k + 2];
-      }
-      const yc = ymin + ymax;
-      // diag(1,−1,−1) is a proper rotation — vertex order stays as is
-      for (let k = 0; k < local.length; k += 3) {
-        coords.push(local[k] + pc.dx, yc - local[k + 1] + pc.dy, zmax - local[k + 2]);
-      }
     } else {
       for (let k = 0; k < local.length; k += 3) {
         coords.push(local[k] + pc.dx, local[k + 1] + pc.dy, local[k + 2]);

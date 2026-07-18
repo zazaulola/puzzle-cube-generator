@@ -140,7 +140,7 @@ function buildPuzzle(params) {
     byName[el.face].pieces.push(piece);
     pieces.push(piece);
   }
-  // per-piece text presence (drives the mesh path and flat-mode flipping);
+  // per-piece text presence (drives the textured mesh path);
   // the sanitized masks from the successful attempt are the real ones
   const finalMasks = built.textMasks;
   if (finalMasks) {
