@@ -203,6 +203,10 @@ function tryBuild(d, N, rng, force, textMasks) {
      offsets from {−1, 0, +1}, excluding the constant profiles — a
      constant profile is a straight line, and a straight border leaves
      the pieces unattached. Deterministic for a given seed. */
+  // Nominal in-face pairs (real profile borders): these are structural —
+  // the attachment validation below holds them to two tooth flanks.
+  // Incidental contacts born from border drift are bonus and exempt.
+  const nominalPairs = new Set();
   for (let fi = 0; fi < NF; fi++) {
     const m = own[fi];
     const borders = new Map(); // pairKey → [{ aCell, bCell, a, b }] in scan order
@@ -224,13 +228,29 @@ function tryBuild(d, N, rng, force, textMasks) {
       }
     }
     for (const bk of [...borders.keys()].sort()) {
+      nominalPairs.add(bk);
       const list = borders.get(bk);
+      /* Require at least two offset steps on the INTERIOR positions of the
+         border. A step is a tooth flank — a wall that can carry a snap
+         fixator; one step is a hinge, two hold the seam. Steps on rim
+         positions do not count: rim cells are re-rolled by the cube-edge
+         tooth lottery below, which erases whatever the profile put there. */
+      const coordOf = pos => (pos.aCell[0] === pos.bCell[0] ? pos.aCell[0] : pos.aCell[1]);
+      const inter = list.map(pos => { const q = coordOf(pos); return q >= 1 && q <= N - 2; });
+      const steps = pr => {
+        let n = 0;
+        for (let s = 1; s < pr.length; s++)
+          if (inter[s] && inter[s - 1] && pr[s] !== pr[s - 1]) n++;
+        return n;
+      };
+      const needSteps = Math.min(2, Math.max(1, inter.filter(Boolean).length - 1));
       let profile, guard = 0;
       do {
         profile = list.map(() => ((rng() * 3) | 0) - 1);
         guard++;
-      } while (guard < 20 && profile.every(o => o === profile[0]));
-      if (profile.every(o => o === profile[0])) profile[0] = profile[0] === 1 ? -1 : 1;
+      } while (guard < 40 && steps(profile) < needSteps);
+      if (steps(profile) < needSteps)
+        profile = list.map((_, s) => (inter[s] ? (s % 2 ? 1 : -1) : 0));
       list.forEach((pos, s) => {
         const o = profile[s];
         if (o === 1) m[pos.bCell[1] * N + pos.bCell[0]] = pos.a;      // a bites into b
@@ -264,20 +284,24 @@ function tryBuild(d, N, rng, force, textMasks) {
        candidate pieces stay the same, a constant sequence would hand the
        whole contact to one side — the pair would then touch only via cap
        faces, with no shared side wall and no fixator. Windows of length
-       ≥2 are forced to be non-constant, so every such pair gets at least
-       one lateral fixator wall across the cube edge. */
+       2 are forced non-constant (one alternation), windows of length ≥3
+       must alternate at least twice: one alternation is a single shared
+       wall — one snap point, a hinge — while two give the pair a proper
+       two-point hold across the cube edge. */
+    const altOf = sq => { let n = 0; for (let q = 1; q < sq.length; q++) if (sq[q] !== sq[q - 1]) n++; return n; };
     let s = 0;
     while (s < pos.length) {
       let epos = s + 1;
       while (epos < pos.length && pos[epos].va === pos[s].va && pos[epos].vb === pos[s].vb) epos++;
       const len = epos - s;
+      const needAlt = Math.min(2, len - 1);
       let seq, guard = 0;
       do {
         seq = [];
         for (let q = 0; q < len; q++) seq.push(rng() < 0.5);
         guard++;
-      } while (len >= 2 && guard < 20 && seq.every(x => x === seq[0]));
-      if (len >= 2 && seq.every(x => x === seq[0])) seq[0] = !seq[0];
+      } while (guard < 30 && altOf(seq) < needAlt);
+      if (altOf(seq) < needAlt) seq = seq.map((_, q) => q % 2 === 0);
       for (let q = 0; q < len; q++) vox.set(pos[s + q].ka, seq[q] ? pos[s + q].va : pos[s + q].vb);
       s = epos;
     }
@@ -472,26 +496,43 @@ function tryBuild(d, N, rng, force, textMasks) {
     }
     return map;
   };
-  const isFlatContact = walls => walls.every(w => w.vert === walls[0].vert &&
-    (w.vert ? w.x0 === walls[0].x0 : w.y0 === walls[0].y0));
+  // Flank walls of an in-face contact: normal along the seam's principal
+  // direction — the only walls where a snap fixator resists the pull.
+  const flankCount = walls => {
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    for (const w of walls) {
+      const mx = (w.x0 + w.x1) / 2, my = (w.y0 + w.y1) / 2;
+      if (mx < xMin) xMin = mx; if (mx > xMax) xMax = mx;
+      if (my < yMin) yMin = my; if (my > yMax) yMax = my;
+    }
+    const px = (xMax - xMin) >= (yMax - yMin);
+    return walls.filter(w => (px ? w.vert === 1 : w.vert === 0)).length;
+  };
 
-  // Wiggle long perfectly straight contacts: force one ±1 steal across
-  // the border, then repair again. The snap fixator would hold a flat
-  // pair anyway, but the shapes should interlock too.
+  // Wiggle weak in-face contacts (fewer than two tooth flanks — straight
+  // or nearly straight borders): force a ±1 steal across the border, then
+  // repair again. Two flanks = two snap points; one is just a hinge.
   for (let cycle = 0; cycle < 5; cycle++) {
     const pw = collectPairWalls();
     let changed = false;
     for (const k of [...pw.keys()].sort()) {
       const walls = pw.get(k);
-      if (walls.length < 2 || !isFlatContact(walls)) continue;
-      const w = walls[(walls.length / 2) | 0];
-      const [cLo, cHi] = wallCellPair(w);
-      const kLo = key(w.fi, cLo[0], cLo[1]), kHi = key(w.fi, cHi[0], cHi[1]);
-      const steals = rng() < 0.5
-        ? [[kHi, w.lo], [kLo, w.hi]]
-        : [[kLo, w.hi], [kHi, w.lo]];
-      for (const [ck, newOwner] of steals) {
-        if (legal(ck).has(newOwner)) { setOwner(ck, newOwner); changed = true; break; }
+      if (walls.length < 2 || flankCount(walls) >= 2) continue;
+      // try walls from the middle outward until one steal is legal
+      const mid = (walls.length / 2) | 0;
+      const order = [...walls.keys()].sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
+      let done = false;
+      for (const wi of order) {
+        if (done) break;
+        const w = walls[wi];
+        const [cLo, cHi] = wallCellPair(w);
+        const kLo = key(w.fi, cLo[0], cLo[1]), kHi = key(w.fi, cHi[0], cHi[1]);
+        const steals = rng() < 0.5
+          ? [[kHi, w.lo], [kLo, w.hi]]
+          : [[kLo, w.hi], [kHi, w.lo]];
+        for (const [ck, newOwner] of steals) {
+          if (legal(ck).has(newOwner)) { setOwner(ck, newOwner); changed = true; done = true; break; }
+        }
       }
     }
     if (!changed) break;
@@ -635,22 +676,37 @@ function tryBuild(d, N, rng, force, textMasks) {
     }
     return false;
   };
+  const flankCount2 = (ws, principalX) =>
+    ws.filter(w => (principalX ? w.vert === 1 : w.vert === 0)).length;
   const fixators = new Map(); // fk → bump owner element id
   for (const pk of [...pairWallsQ.keys()].sort()) {
     const ws = pairWallsQ.get(pk);
     const [pa, pb] = pk.split('|').map(Number);
+    /* Cross-face pairs meet only via walls between two shared voxels —
+       those walls stand perpendicular to the cube edge, so ANY pull that
+       separates the two faces slides them tangentially: every one of
+       them is load-bearing. In-face pairs are held by tooth flanks only. */
+    const cross = elemFace(pa) !== elemFace(pb);
     let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
     for (const w of ws) {
       if (w.x < xMin) xMin = w.x; if (w.x > xMax) xMax = w.x;
       if (w.y < yMin) yMin = w.y; if (w.y > yMax) yMax = w.y;
     }
     const principalX = (xMax - xMin) >= (yMax - yMin);
-    let useful = ws.filter(w => (principalX ? w.vert === 1 : w.vert === 0) && !texty(w));
+    let useful = ws.filter(w => (cross || (principalX ? w.vert === 1 : w.vert === 0)) && !texty(w));
     if (!useful.length) useful = ws.filter(w => !texty(w));
     if (!useful.length) continue; // весь контакт под текстом — пара держится формой
+    /* A long in-face seam (≥6 walls — a full border at d=1, or a border
+       that kept its length at d≥2) with fewer than two tooth flanks would
+       hang on a single snap point — the "piece falls off the assembled
+       corner" bug. Reject the attempt and reroll rather than ship it.
+       Short contacts are exempt: at d≥2 neighboring profiles legitimately
+       eat into a 4-cell border from both ends, and the piece-level check
+       below still guarantees every piece is held at two points. */
+    if (!force && !cross && ws.length >= 6 && flankCount2(ws, principalX) < 2) return null;
     useful.sort((a, b) => principalX ? (a.x - b.x || a.y - b.y) : (a.y - b.y || a.x - b.x));
     let picks;
-    if (ws.length >= 8 && useful.length >= 2) {
+    if (useful.length >= 2) {
       const q1 = Math.floor((useful.length - 1) * 0.3);
       const q2 = Math.ceil((useful.length - 1) * 0.7);
       picks = q1 === q2 ? [useful[q1]] : [useful[q1], useful[q2]];
@@ -658,6 +714,36 @@ function tryBuild(d, N, rng, force, textMasks) {
       picks = [useful[Math.floor(useful.length / 2)]];
     }
     for (const w of picks) fixators.set(w.fk, rng() < 0.5 ? pa : pb);
+  }
+
+  /* Piece-level attachment: every element must be snap-held on at least
+     two of its contacts — a piece held at a single point is a hinge and
+     falls out of a partly assembled cube. A contact holds when it has a
+     load-bearing wall: any wall for cross-edge contacts, a tooth flank
+     for in-face ones. Pieces with text on their seams are exempt (the
+     sub-voxel relief interlocks by form). */
+  if (!force) {
+    const attached = new Map();
+    const textyPiece = new Set();
+    for (const pk of pairWallsQ.keys()) {
+      const ws = pairWallsQ.get(pk);
+      const [pa, pb] = pk.split('|').map(Number);
+      const cross = elemFace(pa) !== elemFace(pb);
+      let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+      for (const w of ws) {
+        if (w.x < xMin) xMin = w.x; if (w.x > xMax) xMax = w.x;
+        if (w.y < yMin) yMin = w.y; if (w.y > yMax) yMax = w.y;
+      }
+      const principalX = (xMax - xMin) >= (yMax - yMin);
+      if (ws.some(w => texty(w))) { textyPiece.add(pa); textyPiece.add(pb); }
+      const holds = ws.some(w => (cross || (principalX ? w.vert === 1 : w.vert === 0)) && !texty(w));
+      if (!holds) continue;
+      attached.set(pa, (attached.get(pa) || 0) + 1);
+      attached.set(pb, (attached.get(pb) || 0) + 1);
+    }
+    for (const id of cellsOf.keys()) {
+      if ((attached.get(id) || 0) < 2 && !textyPiece.has(id)) return null;
+    }
   }
 
   // ---- Outlines and adjacency ----
