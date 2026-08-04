@@ -20,7 +20,10 @@ const state = {
   bedH: 256,
   seed: 'cube-001',
   palette: [...DEFAULT_PALETTE],
-  texts: {}, // face → { t (multi-line), h: l|c|r, v: t|m|b, s: eng|emb }
+  // face → relief config. Text: { mode:'text', t (multi-line), h, v, s, f }.
+  // Image: { mode:'image', img (base64 jpeg, no data: prefix), h, v, s,
+  // scale (0..1), dither, invert }. h: l|c|r, v: t|m|b, s: eng|emb.
+  texts: {},
 };
 
 /* ---------- Face text rasterization (browser canvas) ---------- */
@@ -49,59 +52,201 @@ function ensureFont(fk, sample) {
   } catch (e) { /* offline / no FontFaceSet — fallback font is fine */ }
 }
 
-function rasterizeTexts(N) {
+function rasterizeTextFace(cfg, NS, SUB) {
+  const lines = (cfg.t || '').replace(/\r/g, '').split('\n')
+    .map(s => s.slice(0, 32)).slice(0, 6);
+  if (!lines.join('').trim()) return null;
+  const font = TEXT_FONTS[cfg.f] || TEXT_FONTS.f0;
+  ensureFont(cfg.f, lines.join(''));
+  const cv = document.createElement('canvas');
+  cv.width = NS; cv.height = NS;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  const m = SUB + Math.max(2, Math.round(NS * 0.03)); // ≥1 cell off the rim
+  const availW = NS - 2 * m, availH = NS - 2 * m;
+  let px = Math.max(5, Math.floor(availH / lines.length / 1.2));
+  for (let iter = 0; iter < 8; iter++) {
+    ctx.font = font.css(px);
+    const wMax = Math.max(...lines.map(s => ctx.measureText(s).width), 1);
+    if (wMax <= availW || px <= 5) break;
+    px = Math.max(5, Math.floor(px * availW / wMax));
+  }
+  ctx.font = font.css(px);
+  const lineH = px * 1.2;
+  const blockH = lines.length * lineH;
+  const y0 = cfg.v === 't' ? m : cfg.v === 'b' ? NS - m - blockH : (NS - blockH) / 2;
+  ctx.fillStyle = '#000';
+  ctx.textAlign = cfg.h === 'l' ? 'left' : cfg.h === 'r' ? 'right' : 'center';
+  const x = cfg.h === 'l' ? m : cfg.h === 'r' ? NS - m : NS / 2;
+  lines.forEach((s, i) => ctx.fillText(s, x, y0 + i * lineH + px * 0.8));
+  const img = ctx.getImageData(0, 0, NS, NS).data;
+  const data = new Uint8Array(NS * NS);
+  let any = false;
+  for (let y = 0; y < NS; y++) {
+    for (let xx = 0; xx < NS; xx++) {
+      // hard guarantee: nothing within the rim cell band
+      if (xx < SUB || y < SUB || xx >= NS - SUB || y >= NS - SUB) continue;
+      // 100 (not 128): calligraphic strokes are thinner and antialiased —
+      // a slightly lower threshold keeps hairline parts printable
+      if (img[(y * NS + xx) * 4 + 3] > 100) {
+        data[(NS - 1 - y) * NS + xx] = 1; // face v axis points up
+        any = true;
+      }
+    }
+  }
+  return any ? data : null;
+}
+
+/* ---------- Face image imprint (browser canvas) ---------- */
+
+// Decoded <img> elements per face, keyed by the stored base64 payload so a
+// re-rasterize (e.g. after a difficulty change) reuses the same bitmap; a
+// fresh upload replaces the key and triggers a fresh decode.
+const imgElCache = new Map(); // face → { key, el }
+function getImageEl(face, b64) {
+  const c = imgElCache.get(face);
+  if (c && c.key === b64) return c.el; // el is null while still decoding
+  const el = new Image();
+  imgElCache.set(face, { key: b64, el: null });
+  el.onload = () => {
+    const c2 = imgElCache.get(face);
+    if (c2 && c2.key === b64) { c2.el = el; regenerate(); }
+  };
+  el.src = 'data:image/jpeg;base64,' + b64;
+  return null;
+}
+
+// 8×8 Bayer ordered-dither threshold matrix (0..63) — echoes the puzzle's
+// own 8-cell tile rhythm and turns grayscale gradients into a clean
+// halftone of on/off subpixels instead of a single hard edge.
+const BAYER8 = [
+  0, 32, 8, 40, 2, 34, 10, 42,
+  48, 16, 56, 24, 50, 18, 58, 26,
+  12, 44, 4, 36, 14, 46, 6, 38,
+  60, 28, 52, 20, 62, 30, 54, 22,
+  3, 35, 11, 43, 1, 33, 9, 41,
+  51, 19, 59, 27, 49, 17, 57, 25,
+  15, 47, 7, 39, 13, 45, 5, 37,
+  63, 31, 55, 23, 61, 29, 53, 21,
+];
+
+function rasterizeImageFace(face, cfg, NS, SUB) {
+  if (!cfg.img) return null;
+  const el = getImageEl(face, cfg.img);
+  if (!el) return null; // still decoding — its onload will regenerate()
+  const cv = document.createElement('canvas');
+  cv.width = NS; cv.height = NS;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  const m = SUB + Math.max(2, Math.round(NS * 0.03)); // ≥1 cell off the rim
+  const avail = NS - 2 * m;
+  const box = avail * Math.max(0.1, Math.min(1, cfg.scale ?? 0.85));
+  const ar = (el.naturalWidth || 1) / (el.naturalHeight || 1);
+  const dw = ar >= 1 ? box : box * ar;
+  const dh = ar >= 1 ? box / ar : box;
+  const x0 = cfg.h === 'l' ? m : cfg.h === 'r' ? NS - m - dw : m + (avail - dw) / 2;
+  const y0 = cfg.v === 't' ? m : cfg.v === 'b' ? NS - m - dh : m + (avail - dh) / 2;
+  ctx.drawImage(el, x0, y0, dw, dh);
+  const img = ctx.getImageData(0, 0, NS, NS).data;
+  const data = new Uint8Array(NS * NS);
+  const dither = cfg.dither !== false;
+  let any = false;
+  for (let y = 0; y < NS; y++) {
+    for (let x = 0; x < NS; x++) {
+      if (x < SUB || y < SUB || x >= NS - SUB || y >= NS - SUB) continue;
+      const idx = (y * NS + x) * 4;
+      if (img[idx + 3] < 16) continue; // transparent — no mark
+      let lum = 0.299 * img[idx] + 0.587 * img[idx + 1] + 0.114 * img[idx + 2];
+      if (cfg.invert) lum = 255 - lum;
+      const on = dither
+        ? lum < (BAYER8[(y & 7) * 8 + (x & 7)] + 0.5) / 64 * 255
+        : lum < 128;
+      if (on) { data[(NS - 1 - y) * NS + x] = 1; any = true; }
+    }
+  }
+  return any ? data : null;
+}
+
+function rasterizeReliefs(N) {
   // Adaptive raster resolution: keep the subpixel near the nozzle width
   // (~0.42 mm) instead of a fixed 6/cell — at difficulty 1 a 48×48 grid
-  // turns letters to mush. Capped so the face raster stays ≤ 192².
+  // turns letters (and halftone dots) to mush. Capped so the face raster
+  // stays ≤ 192².
   const cExp = state.autoEdge ? state.maxCell : (state.baseEdge * state.scale) / N;
   TEXT_SUB = Math.max(6, Math.min(Math.floor(cExp / 0.42), Math.floor(192 / N)));
   const SUB = TEXT_SUB, NS = N * SUB;
   const out = {};
   for (const [face, cfg] of Object.entries(state.texts)) {
-    const lines = (cfg.t || '').replace(/\r/g, '').split('\n')
-      .map(s => s.slice(0, 32)).slice(0, 6);
-    if (!lines.join('').trim()) continue;
-    const font = TEXT_FONTS[cfg.f] || TEXT_FONTS.f0;
-    ensureFont(cfg.f, lines.join(''));
-    const cv = document.createElement('canvas');
-    cv.width = NS; cv.height = NS;
-    const ctx = cv.getContext('2d', { willReadFrequently: true });
-    const m = SUB + Math.max(2, Math.round(NS * 0.03)); // ≥1 cell off the rim
-    const availW = NS - 2 * m, availH = NS - 2 * m;
-    let px = Math.max(5, Math.floor(availH / lines.length / 1.2));
-    for (let iter = 0; iter < 8; iter++) {
-      ctx.font = font.css(px);
-      const wMax = Math.max(...lines.map(s => ctx.measureText(s).width), 1);
-      if (wMax <= availW || px <= 5) break;
-      px = Math.max(5, Math.floor(px * availW / wMax));
-    }
-    ctx.font = font.css(px);
-    const lineH = px * 1.2;
-    const blockH = lines.length * lineH;
-    const y0 = cfg.v === 't' ? m : cfg.v === 'b' ? NS - m - blockH : (NS - blockH) / 2;
-    ctx.fillStyle = '#000';
-    ctx.textAlign = cfg.h === 'l' ? 'left' : cfg.h === 'r' ? 'right' : 'center';
-    const x = cfg.h === 'l' ? m : cfg.h === 'r' ? NS - m : NS / 2;
-    lines.forEach((s, i) => ctx.fillText(s, x, y0 + i * lineH + px * 0.8));
-    const img = ctx.getImageData(0, 0, NS, NS).data;
-    const data = new Uint8Array(NS * NS);
-    let any = false;
-    for (let y = 0; y < NS; y++) {
-      for (let xx = 0; xx < NS; xx++) {
-        // hard guarantee: nothing within the rim cell band
-        if (xx < SUB || y < SUB || xx >= NS - SUB || y >= NS - SUB) continue;
-        // 100 (not 128): calligraphic strokes are thinner and antialiased —
-        // a slightly lower threshold keeps hairline parts printable
-        if (img[(y * NS + xx) * 4 + 3] > 100) {
-          data[(NS - 1 - y) * NS + xx] = 1; // face v axis points up
-          any = true;
-        }
-      }
-    }
-    if (any) out[face] = { data, style: cfg.s === 'emb' ? 'emb' : 'eng' };
+    const data = cfg.mode === 'image'
+      ? rasterizeImageFace(face, cfg, NS, SUB)
+      : rasterizeTextFace(cfg, NS, SUB);
+    if (data) out[face] = { data, style: cfg.s === 'emb' ? 'emb' : 'eng' };
   }
   return Object.keys(out).length ? out : null;
 }
+
+/* Uploaded images are downscaled and re-encoded to keep the share link a
+   reasonable length — the final mesh is a coarse binary relief anyway, so
+   source fidelity beyond a few hundred pixels buys nothing. A white
+   backdrop (not canvas' default transparent-black) means a transparent
+   PNG's background reads as "no mark", matching what a logo/silhouette
+   upload would expect. */
+const IMG_DIM_STEPS = [320, 256, 208, 168, 136, 112];
+const IMG_Q_STEPS = [0.75, 0.6, 0.48, 0.38];
+const IMG_B64_CAP = 24000; // ≈18 KB binary — keeps share links pasteable
+
+function compressImageToB64(el) {
+  const ar = (el.naturalWidth || 1) / (el.naturalHeight || 1);
+  const draw = dim => {
+    const w = ar >= 1 ? dim : Math.round(dim * ar);
+    const h = ar >= 1 ? Math.round(dim / ar) : dim;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(el, 0, 0, w, h);
+    return cv;
+  };
+  for (const dim of IMG_DIM_STEPS) {
+    const cv = draw(dim);
+    for (const q of IMG_Q_STEPS) {
+      const durl = cv.toDataURL('image/jpeg', q);
+      const b64 = durl.slice(durl.indexOf(',') + 1);
+      if (b64.length <= IMG_B64_CAP) return b64;
+    }
+  }
+  const durl = draw(IMG_DIM_STEPS[IMG_DIM_STEPS.length - 1]).toDataURL('image/jpeg', 0.32);
+  return durl.slice(durl.indexOf(',') + 1);
+}
+
+function loadImageFile(face, file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const probe = new Image();
+    probe.onload = () => {
+      const b64 = compressImageToB64(probe);
+      const prev = state.texts[face] || {};
+      state.texts[face] = {
+        mode: 'image', img: b64,
+        h: prev.h || 'c', v: prev.v || 'm', s: prev.s || 'eng',
+        scale: prev.scale ?? 0.85, dither: prev.dither ?? true, invert: prev.invert ?? false,
+      };
+      loadTextUI();
+      regenerate();
+    };
+    probe.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Standard base64 → base64url (no padding): keeps the share link free of
+// %2B/%2F/%3D escapes so it stays short and pasteable.
+const toB64Url = s => s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const fromB64Url = s => {
+  let t = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (t.length % 4) t += '=';
+  return t;
+};
 
 /* ---------- Shareable quest link (URL hash) ---------- */
 function stateToHash() {
@@ -116,7 +261,13 @@ function stateToHash() {
   if (state.palette.join() !== DEFAULT_PALETTE.join())
     p.set('pal', state.palette.map(x => x.replace('#', '')).join('.'));
   for (const [face, cfg] of Object.entries(state.texts)) {
-    if ((cfg.t || '').trim()) p.set('x' + face, [cfg.s, cfg.h, cfg.v, cfg.f || 'f0', cfg.t].join('.'));
+    if (cfg.mode === 'image' && cfg.img) {
+      p.set('x' + face, ['img', cfg.s, cfg.h, cfg.v,
+        Math.round((cfg.scale ?? 0.85) * 100), cfg.dither === false ? 0 : 1, cfg.invert ? 1 : 0,
+        toB64Url(cfg.img)].join('.'));
+    } else if ((cfg.t || '').trim()) {
+      p.set('x' + face, [cfg.s, cfg.h, cfg.v, cfg.f || 'f0', cfg.t].join('.'));
+    }
   }
   if (document.body.classList.contains('debug')) p.set('dbg', '1');
   return p.toString();
@@ -152,6 +303,18 @@ function applyHash() {
     const raw = p.get('x' + f);
     if (!raw) continue;
     const seg = raw.split('.');
+    if (seg[0] === 'img') {
+      if (seg.length < 8) continue;
+      const s = seg[1] === 'emb' ? 'emb' : 'eng';
+      const h = ['l', 'c', 'r'].includes(seg[2]) ? seg[2] : 'c';
+      const v = ['t', 'm', 'b'].includes(seg[3]) ? seg[3] : 'm';
+      const scale = Math.min(100, Math.max(10, parseInt(seg[4], 10) || 85)) / 100;
+      const dither = seg[5] !== '0';
+      const invert = seg[6] === '1';
+      const b64 = fromB64Url(seg.slice(7).join('.'));
+      if (b64) state.texts[f] = { mode: 'image', s, h, v, scale, dither, invert, img: b64 };
+      continue;
+    }
     if (seg.length < 4) continue;
     const s = seg[0] === 'emb' ? 'emb' : 'eng';
     const h = ['l', 'c', 'r'].includes(seg[1]) ? seg[1] : 'c';
@@ -160,7 +323,7 @@ function applyHash() {
     const hasFont = seg.length >= 5 && /^f[0-3]$/.test(seg[3]);
     const fnt = hasFont ? seg[3] : 'f0';
     const txt = seg.slice(hasFont ? 4 : 3).join('.').slice(0, 200);
-    if (txt.trim()) state.texts[f] = { t: txt, h, v, s, f: fnt };
+    if (txt.trim()) state.texts[f] = { mode: 'text', t: txt, h, v, s, f: fnt };
   }
   if (p.get('dbg') === '1') document.body.classList.add('debug');
   return true;
@@ -183,28 +346,60 @@ function syncUI() {
   loadTextUI();
 }
 
-/* ---------- Face text controls ---------- */
+/* ---------- Face text/image controls ---------- */
 let curTextFace = 'F';
+let curMode = 'text'; // which panel is shown — independent of committed content
 const textCfg = f => state.texts[f] || { t: '', h: 'c', v: 'm', s: 'eng', f: 'f0' };
 function loadTextUI() {
-  const cfg = textCfg(curTextFace);
-  $('#inp-text').value = cfg.t;
+  const cfg = state.texts[curTextFace];
+  curMode = (cfg && cfg.mode === 'image') ? 'image' : 'text';
+  syncSeg('#seg-content', curMode);
+  $('#mode-text').style.display = curMode === 'text' ? '' : 'none';
+  $('#mode-image').style.display = curMode === 'image' ? '' : 'none';
+
+  const tc = textCfg(curTextFace);
+  $('#inp-text').value = tc.t || '';
   syncSeg('#seg-textface', curTextFace);
-  syncSeg('#seg-th', cfg.h);
-  syncSeg('#seg-tv', cfg.v);
-  syncSeg('#seg-ts', cfg.s);
-  syncSeg('#seg-tf', cfg.f || 'f0');
-  // отметка граней с текстом
-  $$('#seg-textface button').forEach(b =>
-    b.classList.toggle('has', !!(state.texts[b.dataset.v] || {}).t));
+  syncSeg('#seg-th', tc.h);
+  syncSeg('#seg-tv', tc.v);
+  syncSeg('#seg-ts', tc.s);
+  syncSeg('#seg-tf', tc.f || 'f0');
+
+  const thumb = $('#img-thumb');
+  if (cfg && cfg.mode === 'image' && cfg.img) {
+    thumb.src = 'data:image/jpeg;base64,' + cfg.img;
+    thumb.classList.add('has');
+  } else {
+    thumb.removeAttribute('src');
+    thumb.classList.remove('has');
+  }
+  $('#chk-dither').checked = cfg ? (cfg.dither ?? true) : true;
+  $('#chk-invert').checked = cfg ? (cfg.invert ?? false) : false;
+  const scalePct = Math.round((cfg && cfg.scale != null ? cfg.scale : 0.85) * 100);
+  $('#rng-scale').value = scalePct;
+  $('#img-scale-val').textContent = scalePct + '%';
+
+  // отметка граней с содержимым (текст или изображение)
+  $$('#seg-textface button').forEach(b => {
+    const c = state.texts[b.dataset.v];
+    b.classList.toggle('has', !!(c && (c.mode === 'image' ? c.img : c.t)));
+  });
 }
 function saveTextUI() {
-  const t2 = $('#inp-text').value.replace(/\r/g, '').slice(0, 200);
+  const cur = state.texts[curTextFace];
   const pick = sel => ($(sel + ' button.on') || $(sel + ' button')).dataset.v;
-  if (t2.trim()) {
-    state.texts[curTextFace] = { t: t2, h: pick('#seg-th'), v: pick('#seg-tv'), s: pick('#seg-ts'), f: pick('#seg-tf') };
+  if (cur && cur.mode === 'image') {
+    cur.h = pick('#seg-th'); cur.v = pick('#seg-tv'); cur.s = pick('#seg-ts');
+    cur.dither = $('#chk-dither').checked;
+    cur.invert = $('#chk-invert').checked;
+    cur.scale = (parseInt($('#rng-scale').value, 10) || 85) / 100;
   } else {
-    delete state.texts[curTextFace];
+    const t2 = $('#inp-text').value.replace(/\r/g, '').slice(0, 200);
+    if (t2.trim()) {
+      state.texts[curTextFace] = { mode: 'text', t: t2, h: pick('#seg-th'), v: pick('#seg-tv'), s: pick('#seg-ts'), f: pick('#seg-tf') };
+    } else {
+      delete state.texts[curTextFace];
+    }
   }
   loadTextUI();
   regenerate();
@@ -274,7 +469,7 @@ function regenerate() {
     colors: state.colors,
     L: 8 * state.difficulty, // 1 mm cell — the base geometry
     seed: state.seed,
-    textMasks: rasterizeTexts(8 * state.difficulty),
+    textMasks: rasterizeReliefs(8 * state.difficulty),
   });
   const L = state.autoEdge ? findMaxEdge(base) : state.baseEdge * state.scale;
   model = scaledModel(base, L);
@@ -492,9 +687,19 @@ function init() {
     inp.addEventListener('input', () => { state.palette[k] = inp.value; renderAll(); });
   });
 
-  // face text controls
+  // face text/image controls
   $$('#seg-textface button').forEach(b => {
     b.addEventListener('click', () => { curTextFace = b.dataset.v; loadTextUI(); });
+  });
+  $$('#seg-content button').forEach(b => {
+    b.addEventListener('click', () => {
+      // switches which panel is shown; nothing is committed until the
+      // user actually types text or picks an image
+      curMode = b.dataset.v;
+      syncSeg('#seg-content', curMode);
+      $('#mode-text').style.display = curMode === 'text' ? '' : 'none';
+      $('#mode-image').style.display = curMode === 'image' ? '' : 'none';
+    });
   });
   let textTimer = null;
   $('#inp-text').addEventListener('input', () => {
@@ -509,6 +714,25 @@ function init() {
       });
     });
   }
+
+  $('#inp-image').addEventListener('change', e => {
+    const file = e.target.files && e.target.files[0];
+    if (file) loadImageFile(curTextFace, file);
+    e.target.value = ''; // allow re-picking the same file later
+  });
+  $('#btn-image-clear').addEventListener('click', () => {
+    delete state.texts[curTextFace];
+    loadTextUI();
+    regenerate();
+  });
+  $('#chk-dither').addEventListener('change', saveTextUI);
+  $('#chk-invert').addEventListener('change', saveTextUI);
+  let scaleTimer = null;
+  $('#rng-scale').addEventListener('input', () => {
+    $('#img-scale-val').textContent = $('#rng-scale').value + '%';
+    clearTimeout(scaleTimer);
+    scaleTimer = setTimeout(saveTextUI, 200);
+  });
 
   $('#btn-zip').addEventListener('click', downloadAll);
 

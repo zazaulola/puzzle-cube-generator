@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Lobster&family=Caveat:wght@700&family=Playfair+Display:wght@800&display=swap" rel="stylesheet">
 <meta name="theme-color" content="#12171d">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -101,7 +101,42 @@
       <button data-v="T" data-i18n="face_T">Top</button>
       <button data-v="Bo" data-i18n="face_Bo">Bottom</button>
     </div>
-    <textarea id="inp-text" class="num txt" rows="2" spellcheck="false"></textarea>
+    <div class="seg seg-mini seg-content" id="seg-content">
+      <button data-v="text" class="on" data-i18n="contentText">text</button>
+      <button data-v="image" data-i18n="contentImage">image</button>
+    </div>
+
+    <div id="mode-text">
+      <textarea id="inp-text" class="num txt" rows="2" spellcheck="false"></textarea>
+      <div class="seg seg-mini seg-fonts" id="seg-tf">
+        <button data-v="f0" class="on" title="Arial Black" style="font-family:Arial,sans-serif;font-weight:900">Aa</button>
+        <button data-v="f1" title="Lobster" style="font-family:Lobster,cursive">Aa</button>
+        <button data-v="f2" title="Caveat" style="font-family:Caveat,cursive;font-weight:700">Aa</button>
+        <button data-v="f3" title="Playfair Display" style="font-family:'Playfair Display',serif;font-weight:800">Aa</button>
+      </div>
+    </div>
+
+    <div id="mode-image" style="display:none">
+      <div class="img-row">
+        <label class="img-drop" for="inp-image">
+          <img id="img-thumb" alt="">
+          <span data-i18n="imgChoose">choose an image…</span>
+        </label>
+        <input type="file" id="inp-image" accept="image/*" hidden>
+        <button id="btn-image-clear" type="button" data-i18n-title="imgClear" title="remove image">✕</button>
+      </div>
+      <div class="img-sliders">
+        <label class="chk"><input type="checkbox" id="chk-dither" checked><span data-i18n="imgDither">halftone dithering</span></label>
+        <label class="chk"><input type="checkbox" id="chk-invert"><span data-i18n="imgInvert">invert</span></label>
+      </div>
+      <div class="range-row">
+        <span data-i18n="imgScale">size</span>
+        <input type="range" id="rng-scale" min="20" max="100" step="1" value="85">
+        <b id="img-scale-val">85%</b>
+      </div>
+      <p class="note" data-i18n="imgHint">the image becomes a small pixel relief (dark = raised/engraved); it travels inside the share link.</p>
+    </div>
+
     <div class="text-opts">
       <div class="seg seg-mini" id="seg-th">
         <button data-v="l">⇤</button><button data-v="c" class="on">↔</button><button data-v="r">⇥</button>
@@ -113,12 +148,6 @@
         <button data-v="eng" class="on" data-i18n="tsEng">engraved</button>
         <button data-v="emb" data-i18n="tsEmb">embossed</button>
       </div>
-    </div>
-    <div class="seg seg-mini seg-fonts" id="seg-tf">
-      <button data-v="f0" class="on" title="Arial Black" style="font-family:Arial,sans-serif;font-weight:900">Aa</button>
-      <button data-v="f1" title="Lobster" style="font-family:Lobster,cursive">Aa</button>
-      <button data-v="f2" title="Caveat" style="font-family:Caveat,cursive;font-weight:700">Aa</button>
-      <button data-v="f3" title="Playfair Display" style="font-family:'Playfair Display',serif;font-weight:800">Aa</button>
     </div>
   </section>
 
@@ -164,12 +193,12 @@
   </div>
 </main>
 
-<script src="js/i18n.js?v=37"></script>
-<script src="js/geometry.js?v=37"></script>
-<script src="js/pieces.js?v=37"></script>
-<script src="js/layout.js?v=37"></script>
-<script src="js/stl.js?v=37"></script>
-<script src="js/preview.js?v=37"></script>
-<script src="js/app.js?v=37"></script>
+<script src="js/i18n.js?v=38"></script>
+<script src="js/geometry.js?v=38"></script>
+<script src="js/pieces.js?v=38"></script>
+<script src="js/layout.js?v=38"></script>
+<script src="js/stl.js?v=38"></script>
+<script src="js/preview.js?v=38"></script>
+<script src="js/app.js?v=38"></script>
 </body>
 </html>
