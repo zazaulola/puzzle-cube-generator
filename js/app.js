@@ -19,6 +19,8 @@ const state = {
   bedW: 256,        // print plate size, mm (fixed)
   bedH: 256,
   seed: 'cube-001',
+  hintCube: false,  // add a small solid color-guide cube to the file set
+  hintEdge: 30,     // its edge, mm
   palette: [...DEFAULT_PALETTE],
   // face → relief config. Text: { mode:'text', t (multi-line), h, v, s, f }.
   // Image: { mode:'image', img (base64 jpeg, no data: prefix), h, v, s,
@@ -258,6 +260,7 @@ function stateToHash() {
   p.set('m', state.maxCell);
   p.set('seed', state.seed);
   if (!state.autoEdge) p.set('e', state.baseEdge);
+  if (state.hintCube && state.colors === 4) p.set('hc', state.hintEdge);
   if (state.palette.join() !== DEFAULT_PALETTE.join())
     p.set('pal', state.palette.map(x => x.replace('#', '')).join('.'));
   for (const [face, cfg] of Object.entries(state.texts)) {
@@ -293,6 +296,8 @@ function applyHash() {
   } else {
     state.autoEdge = true;
   }
+  state.hintCube = p.has('hc');
+  if (p.has('hc')) state.hintEdge = int(p.get('hc'), 20, 80, state.hintEdge);
   if (p.has('pal')) {
     const parts = p.get('pal').split('.');
     if (parts.length === 4 && parts.every(x => /^[0-9a-fA-F]{6}$/.test(x)))
@@ -342,6 +347,8 @@ function syncUI() {
   if (!state.autoEdge) $('#inp-edge').value = state.baseEdge;
   $('#inp-maxcell').value = state.maxCell;
   $('#inp-seed').value = state.seed;
+  $('#chk-hint').checked = state.hintCube;
+  $('#inp-hint').value = state.hintEdge;
   $$('#color-pickers input').forEach((inp, k) => { inp.value = state.palette[k]; });
   loadTextUI();
 }
@@ -550,24 +557,46 @@ function renderPlates() {
   });
 }
 
+const hintEnabled = () => state.hintCube && state.colors === 4;
+function hintFileName(k) { // k = 0..3 color index, null = core body
+  const d = state.difficulty;
+  return k === null ? `cube_d${d}_hint_core.stl` : `cube_d${d}_hint_${COLOR_NAMES[k]}.stl`;
+}
+
 function renderFiles() {
   const list = $('#file-list');
   list.innerHTML = '';
-  plates.forEach(pl => {
+  const addRow = (swHtml, name, note, onDl) => {
     const row = document.createElement('div');
     row.className = 'file-row';
-    const sw = pl.color === null
-      ? `<i class="swatch mono"></i>`
-      : `<i class="swatch" style="background:${state.palette[pl.color]}"></i>`;
-    row.innerHTML = `${sw}<code>${plateFileName(pl)}</code><span>${pl.pieces.length} ${t('pcs')}</span>`;
+    row.innerHTML = `${swHtml}<code>${name}</code><span>${note}</span>`;
     const btn = document.createElement('button');
     btn.className = 'dl-btn';
     btn.textContent = 'STL ↓';
-    btn.addEventListener('click', () => downloadPlate(pl));
+    btn.addEventListener('click', onDl);
     row.appendChild(btn);
     list.appendChild(row);
+  };
+  plates.forEach(pl => {
+    const sw = pl.color === null
+      ? `<i class="swatch mono"></i>`
+      : `<i class="swatch" style="background:${state.palette[pl.color]}"></i>`;
+    addRow(sw, plateFileName(pl), `${pl.pieces.length} ${t('pcs')}`, () => downloadPlate(pl));
   });
-  $('#dl-count').textContent = plates.length;
+  let count = plates.length;
+  // the hint-cube option only makes sense for the 4-color puzzle
+  $('#hint-row').style.display = state.colors === 4 ? '' : 'none';
+  if (hintEnabled()) {
+    for (const hf of hintSTLs(model, state.hintEdge)) {
+      const sw = hf.color === null
+        ? `<i class="swatch mono"></i>`
+        : `<i class="swatch" style="background:${state.palette[hf.color]}"></i>`;
+      addRow(sw, hintFileName(hf.color), t('hintTag'),
+        () => downloadBlob(new Blob([hf.buf], { type: 'model/stl' }), hintFileName(hf.color)));
+      count++;
+    }
+  }
+  $('#dl-count').textContent = count;
 }
 
 /* ---------- Downloads ---------- */
@@ -588,6 +617,11 @@ function downloadAll() {
     name: plateFileName(pl),
     data: new Uint8Array(plateSTL(pl, model)),
   }));
+  if (hintEnabled()) {
+    for (const hf of hintSTLs(model, state.hintEdge)) {
+      files.push({ name: hintFileName(hf.color), data: new Uint8Array(hf.buf) });
+    }
+  }
   const readme =
 `${t('rm_title')}
 ================================
@@ -599,7 +633,7 @@ Seed: ${state.seed}
 ${t('rm_unique')}: ${model.unique ? t('yes') : t('no')}
 
 ${state.orient === 'tilt' ? t('rm_tilt') : t('rm_print')}
-${t('rm_assembly')}
+${hintEnabled() ? t('rm_hint', state.hintEdge) + '\n' : ''}${t('rm_assembly')}
 `;
   files.push({ name: 'README.txt', data: new TextEncoder().encode(readme) });
   const zipName = `puzzle-cube_d${state.difficulty}_${state.scale}x_${state.colors}col.zip`;
@@ -732,6 +766,24 @@ function init() {
     $('#img-scale-val').textContent = $('#rng-scale').value + '%';
     clearTimeout(scaleTimer);
     scaleTimer = setTimeout(saveTextUI, 200);
+  });
+
+  // hint cube: no model rebuild needed — just the hash and the file list
+  const hintChanged = () => {
+    history.replaceState(null, '', '#' + stateToHash());
+    renderFiles();
+  };
+  $('#chk-hint').addEventListener('change', () => {
+    state.hintCube = $('#chk-hint').checked;
+    hintChanged();
+  });
+  $('#inp-hint').addEventListener('change', () => {
+    let v = parseFloat($('#inp-hint').value.replace(',', '.'));
+    if (isNaN(v)) v = state.hintEdge;
+    v = Math.min(80, Math.max(20, Math.round(v)));
+    $('#inp-hint').value = v;
+    state.hintEdge = v;
+    hintChanged();
   });
 
   $('#btn-zip').addEventListener('click', downloadAll);

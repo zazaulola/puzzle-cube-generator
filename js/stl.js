@@ -276,6 +276,96 @@ function buildTexturedPieceMesh(piece, model, c, t, clearance, emitRaw) {
   }
 }
 
+/* ---------- Hint cube: a small solid color guide ----------
+   A much smaller solid cube whose faces show the 4-color scheme of the
+   puzzle as a mosaic of the NOMINAL 8×4 elements — plain 1×2 rectangles,
+   no real tooth shapes, so it spoils colors but not the cutting.
+
+   STL carries no colors, so (exactly like the puzzle plates) the guide
+   is split into one STL per filament: a core body plus four tile sets.
+   All five files share one coordinate space — imported together into the
+   slicer as a single multi-part object, each part gets its filament.
+   The core is a closed solid, so the slicer gives it regular infill.
+
+   Partition of the cube [0,H]³ (no two bodies ever overlap):
+   - each face carries a pocket [f, H−f]² of depth s on its surface,
+     filled exactly by the color tiles (flush with the surface);
+   - the core is the rest: the inner block plus a frame of width f
+     around every face and along the cube edges (frame cuboids of the
+     same body may overlap each other — slicers union shells per part).
+   s ≤ f keeps neighboring faces' pockets clear of each other. */
+const HINT_SHELL = 0.8; // tile depth, mm
+const HINT_FRAME = 1.2; // frame width around each face mosaic, mm
+
+// Closed axis-aligned box, CCW from outside (12 triangles)
+function emitBox(coords, x0, y0, z0, x1, y1, z1) {
+  const q = (a, b, c2, d2) => coords.push(...a, ...b, ...c2, ...a, ...c2, ...d2);
+  q([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]); // −x
+  q([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]); // +x
+  q([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]); // −y
+  q([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]); // +y
+  q([x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]); // −z
+  q([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]); // +z
+}
+
+// Nominal 1×2 rect of a piece in face quads (quad = 4 cells; face = Q×Q
+// quads, Q = 2d). Decoded from piece.id = "Face-I-J-half" plus the same
+// checkerboard phase table the cutting itself was built from.
+function hintRect(piece, d, PHI, faceIdx) {
+  const seg = piece.id.split('-');
+  const I = +seg[1], J = +seg[2], half = +seg[3];
+  const horiz = (I + J + PHI[faceIdx[piece.face]]) % 2 === 0;
+  return horiz
+    ? { qu0: 2 * I, qu1: 2 * I + 2, qv0: 2 * J + half, qv1: 2 * J + half + 1 }
+    : { qu0: 2 * I + half, qu1: 2 * I + half + 1, qv0: 2 * J, qv1: 2 * J + 2 };
+}
+
+// Face-local mm rect (u,v ∈ [uu0,uu1]×[vv0,vv1], inward depth w ∈ [w0,w1])
+// → world axis-aligned box via the FACE_DEFS frame (all axes are ±unit).
+function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1) {
+  const W = [
+    fd.U[1] * fd.V[2] - fd.U[2] * fd.V[1],
+    fd.U[2] * fd.V[0] - fd.U[0] * fd.V[2],
+    fd.U[0] * fd.V[1] - fd.U[1] * fd.V[0],
+  ];
+  const pt = (u, v, w) => [0, 1, 2].map(k => fd.O[k] * H + u * fd.U[k] + v * fd.V[k] - w * W[k]);
+  const a = pt(uu0, vv0, w1), b = pt(uu1, vv1, w0);
+  emitBox(coords,
+    Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]),
+    Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2]));
+}
+
+// The five bodies: [{color: 0..3, buf}, ..., {color: null, buf}] (core last)
+function hintSTLs(model, H) {
+  const d = model.difficulty;
+  const PHI = solveFacePhases(d);
+  const faceIdx = Object.fromEntries(FACE_DEFS.map((fd, k) => [fd.name, k]));
+  const byFace = Object.fromEntries(FACE_DEFS.map(fd => [fd.name, fd]));
+  const s = HINT_SHELL, f = HINT_FRAME;
+  const Q = 2 * d, q = (H - 2 * f) / Q;
+
+  const bodies = [[], [], [], []];
+  for (const p of model.pieces) {
+    const r = hintRect(p, d, PHI, faceIdx);
+    faceBox(bodies[p.color], byFace[p.face], H,
+      f + r.qu0 * q, f + r.qv0 * q, f + r.qu1 * q, f + r.qv1 * q, 0, s);
+  }
+
+  const core = [];
+  emitBox(core, s, s, s, H - s, H - s, H - s); // inner block
+  for (const fd of FACE_DEFS) {
+    // frame ring of the face slab (the pocket itself belongs to the tiles)
+    faceBox(core, fd, H, 0, 0, H, f, 0, s);         // v-low strip
+    faceBox(core, fd, H, 0, H - f, H, H, 0, s);     // v-high strip
+    faceBox(core, fd, H, 0, f, f, H - f, 0, s);     // u-low strip
+    faceBox(core, fd, H, H - f, f, H, H - f, 0, s); // u-high strip
+  }
+
+  const out = bodies.map((coords, k) => ({ color: k, buf: buildSTL(coords) }));
+  out.push({ color: null, buf: buildSTL(core) });
+  return out;
+}
+
 // Binary STL from a flat coordinate array (9 numbers per triangle)
 function buildSTL(coords) {
   const triCount = coords.length / 9;

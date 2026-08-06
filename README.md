@@ -29,6 +29,8 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 
 **Image imprint**: any face can instead carry an uploaded image, converted to the same kind of relief. It's fit inside the face (contain, with adjustable size and the same 3×3 alignment), converted to grayscale and thresholded — with optional 8×8 ordered (Bayer) dithering for a clean halftone look on photos — and can be inverted. The source image is downscaled and re-encoded client-side before it's embedded in the share link, since the printed result is a coarse binary relief regardless of source resolution.
 
+**Hint cube**: an optional small solid cube (20–80 mm) whose faces show the puzzle's color scheme as plain **nominal 1×2 rectangles** — colors only, no piece shapes, so it helps sort pieces by face without spoiling the cutting. STL carries no colors, so the guide ships as five files sharing one coordinate space: a core body (the slicer gives it regular infill) plus four color tile sets, flush-embedded into the surface with a thin core-colored frame along the edges. Import all five together, merge into one multi-part object ("Yes" in the slicer dialog), assign a filament to each part, print.
+
 Every configuration has a **shareable link**: the URL hash encodes the whole quest (`#d=2&c=4&k=1&o=flat&m=6&seed=…`) — the 🔗 button copies it, and opening such a link restores the exact same puzzle. Appending `&dbg=1` (or `?debug`) reveals the hidden fixator markers on the net preview: dot = bump, ring = socket.
 
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.
