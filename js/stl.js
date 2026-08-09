@@ -375,11 +375,18 @@ function hintSTLs(model, H) {
 /* Single-file 3MF export of the hint cube. 3MF is a zip of XML: the core
    spec carries all five meshes as objects assembled into one build item,
    with basematerials giving each part its display color (the user's own
-   palette). On top of that, Metadata/model_settings.config — the config
-   file Bambu Studio / Orca read — declares the five meshes as PARTS of
-   one object with a filament ("extruder") preassigned per part: colors
-   1–4 map to AMS slots 1–4, the core defaults to slot 1. Slicers that
-   ignore the config still open five correctly placed colored objects. */
+   palette).
+
+   Deliberately NO slicer-specific config inside. Bambu Studio / Orca
+   run their color-to-filament import flow for third-party 3MFs (each
+   triangle inherits the object's material color, and the import dialog
+   maps distinct colors to filaments, adding slots as needed) — but only
+   through the loader branch where no Metadata/model_settings.config is
+   present; shipping that config suppresses the color mapping and pins
+   parts to filament slots a fresh project does not have yet, which
+   renders the whole cube in a single color (verified against
+   BambuStudio's bbs_3mf.cpp importer). The components assembly still
+   loads as one five-part object either way. */
 function hint3MF(model, H, palette) {
   const parts = hintBodies(model, H);
   const fmt = v => String(+v.toFixed(6));
@@ -409,7 +416,7 @@ function hint3MF(model, H, palette) {
         tris += `<triangle v1="${idxOf(o)}" v2="${idxOf(o + 3)}" v3="${idxOf(o + 6)}"/>`;
       }
     }
-    res += `<object id="${k + 1}" p:UUID="${uuid(k + 1)}" type="model" pid="9" pindex="${k}"><mesh><vertices>`;
+    res += `<object id="${k + 1}" p:UUID="${uuid(k + 1)}" name="${names[k]}" type="model" pid="9" pindex="${k}"><mesh><vertices>`;
     res += verts.map(v => {
       const [x, y, z] = v.split('|');
       return `<vertex x="${x}" y="${y}" z="${z}"/>`;
@@ -426,38 +433,22 @@ function hint3MF(model, H, palette) {
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<model unit="millimeter" xml:lang="en-US"` +
     ` xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"` +
-    ` xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"` +
-    ` xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">` +
+    ` xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">` +
     `<metadata name="Application">puzzle-cube-generator</metadata>` +
-    `<metadata name="BambuStudio:3mfVersion">1</metadata>` +
+    `<metadata name="Title">puzzle-hint-cube</metadata>` +
     `<resources>` +
     `<basematerials id="9">${mats}</basematerials>` +
     res +
-    `<object id="6" p:UUID="${uuid(6)}" type="model"><components>${comps}</components></object>` +
+    `<object id="6" p:UUID="${uuid(6)}" name="puzzle-hint-cube" type="model"><components>${comps}</components></object>` +
     `</resources>` +
-    // printable="1" is a de-facto BambuStudio attribute (their own writer
-    // emits it unprefixed); harmless for core-spec consumers
-    `<build p:UUID="${uuid(100)}"><item objectid="6" p:UUID="${uuid(101)}" printable="1"/></build>` +
+    `<build p:UUID="${uuid(100)}"><item objectid="6" p:UUID="${uuid(101)}"/></build>` +
     `</model>`;
-
-  const settingsXml =
-    `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n` +
-    `  <object id="6">\n` +
-    `    <metadata key="name" value="puzzle-hint-cube"/>\n` +
-    `    <metadata key="extruder" value="1"/>\n` +
-    parts.map((p, k) =>
-      `    <part id="${k + 1}" subtype="normal_part">\n` +
-      `      <metadata key="name" value="${names[k]}"/>\n` +
-      `      <metadata key="extruder" value="${p.color === null ? 1 : p.color + 1}"/>\n` +
-      `    </part>\n`).join('') +
-    `  </object>\n</config>\n`;
 
   const contentTypes =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
     `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
     `<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>` +
-    `<Default Extension="config" ContentType="text/xml"/>` +
     `</Types>`;
 
   const rels =
@@ -472,7 +463,6 @@ function hint3MF(model, H, palette) {
     { name: '[Content_Types].xml', data: enc.encode(contentTypes) },
     { name: '_rels/.rels', data: enc.encode(rels) },
     { name: '3D/3dmodel.model', data: enc.encode(modelXml) },
-    { name: 'Metadata/model_settings.config', data: enc.encode(settingsXml) },
   ]);
 }
 
