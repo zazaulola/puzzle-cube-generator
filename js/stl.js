@@ -287,15 +287,23 @@ function buildTexturedPieceMesh(piece, model, c, t, clearance, emitRaw) {
    slicer as a single multi-part object, each part gets its filament.
    The core is a closed solid, so the slicer gives it regular infill.
 
-   Partition of the cube [0,H]³ (no two bodies ever overlap):
-   - each face carries a pocket [f, H−f]² of depth s on its surface,
-     filled exactly by the color tiles (flush with the surface);
-   - the core is the rest: the inner block plus a frame of width f
+   Partition of the cube [0,H]³ (no two bodies ever overlap), two looks:
+   - framed: each face carries a pocket [f, H−f]² of depth s filled
+     exactly by the color tiles; the core adds a frame of width f
      around every face and along the cube edges (frame cuboids of the
-     same body may overlap each other — slicers union shells per part).
-   s ≤ f keeps neighboring faces' pockets clear of each other. */
+     same body may overlap each other — slicers union shells per part;
+     s ≤ f keeps neighboring faces' pockets clear of each other);
+   - frameless (default): mosaics span the faces edge to edge, and the
+     colliding surface slabs along the cube edges are resolved with a
+     fixed "matchbox" priority — the z-faces own the full edges, the
+     y-faces yield to them, the x-faces yield to both — by clipping
+     each tile box to its face's allowed region. The visible cost is a
+     tile-depth-thin strip along each edge showing the neighbor face's
+     tile sides, much like the edge teeth of the real cube. */
 const HINT_SHELL = 0.8; // tile depth, mm
-const HINT_FRAME = 1.2; // frame width around each face mosaic, mm
+const HINT_FRAME = 1.2; // frame width around each face mosaic, mm (framed look)
+// frameless mode: world-axis clip per face (the matchbox priority)
+const HINT_CLIP = { T: '', Bo: '', F: 'z', B: 'z', L: 'yz', R: 'yz' };
 
 // Closed axis-aligned box, CCW from outside (12 triangles)
 function emitBox(coords, x0, y0, z0, x1, y1, z1) {
@@ -322,7 +330,10 @@ function hintRect(piece, d, PHI, faceIdx) {
 
 // Face-local mm rect (u,v ∈ [uu0,uu1]×[vv0,vv1], inward depth w ∈ [w0,w1])
 // → world axis-aligned box via the FACE_DEFS frame (all axes are ±unit).
-function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1) {
+// clip: '' or a subset of 'yz' — world axes clamped to [s, H−s] (the
+// frameless matchbox priority; never clips a box away entirely, tiles
+// are far wider than the shell depth).
+function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1, clip) {
   const W = [
     fd.U[1] * fd.V[2] - fd.U[2] * fd.V[1],
     fd.U[2] * fd.V[0] - fd.U[0] * fd.V[2],
@@ -330,36 +341,47 @@ function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1) {
   ];
   const pt = (u, v, w) => [0, 1, 2].map(k => fd.O[k] * H + u * fd.U[k] + v * fd.V[k] - w * W[k]);
   const a = pt(uu0, vv0, w1), b = pt(uu1, vv1, w0);
-  emitBox(coords,
-    Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]),
-    Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2]));
+  const mn = [0, 1, 2].map(k => Math.min(a[k], b[k]));
+  const mx = [0, 1, 2].map(k => Math.max(a[k], b[k]));
+  const s = HINT_SHELL;
+  if (clip) {
+    for (const ax of clip) {
+      const k = ax === 'y' ? 1 : 2;
+      mn[k] = Math.max(mn[k], s);
+      mx[k] = Math.min(mx[k], H - s);
+    }
+  }
+  emitBox(coords, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
 }
 
 // The five bodies as raw triangle soups: [{color: 0..3, coords}, ...,
 // {color: null, coords}] (core last) — shared by the STL and 3MF exports
-function hintBodies(model, H) {
+function hintBodies(model, H, frame) {
   const d = model.difficulty;
   const PHI = solveFacePhases(d);
   const faceIdx = Object.fromEntries(FACE_DEFS.map((fd, k) => [fd.name, k]));
   const byFace = Object.fromEntries(FACE_DEFS.map(fd => [fd.name, fd]));
-  const s = HINT_SHELL, f = HINT_FRAME;
+  const s = HINT_SHELL, f = frame ? HINT_FRAME : 0;
   const Q = 2 * d, q = (H - 2 * f) / Q;
 
   const bodies = [[], [], [], []];
   for (const p of model.pieces) {
     const r = hintRect(p, d, PHI, faceIdx);
     faceBox(bodies[p.color], byFace[p.face], H,
-      f + r.qu0 * q, f + r.qv0 * q, f + r.qu1 * q, f + r.qv1 * q, 0, s);
+      f + r.qu0 * q, f + r.qv0 * q, f + r.qu1 * q, f + r.qv1 * q, 0, s,
+      frame ? '' : HINT_CLIP[p.face]);
   }
 
   const core = [];
   emitBox(core, s, s, s, H - s, H - s, H - s); // inner block
-  for (const fd of FACE_DEFS) {
-    // frame ring of the face slab (the pocket itself belongs to the tiles)
-    faceBox(core, fd, H, 0, 0, H, f, 0, s);         // v-low strip
-    faceBox(core, fd, H, 0, H - f, H, H, 0, s);     // v-high strip
-    faceBox(core, fd, H, 0, f, f, H - f, 0, s);     // u-low strip
-    faceBox(core, fd, H, H - f, f, H, H - f, 0, s); // u-high strip
+  if (frame) {
+    for (const fd of FACE_DEFS) {
+      // frame ring of the face slab (the pocket itself belongs to the tiles)
+      faceBox(core, fd, H, 0, 0, H, f, 0, s);         // v-low strip
+      faceBox(core, fd, H, 0, H - f, H, H, 0, s);     // v-high strip
+      faceBox(core, fd, H, 0, f, f, H - f, 0, s);     // u-low strip
+      faceBox(core, fd, H, H - f, f, H, H - f, 0, s); // u-high strip
+    }
   }
 
   const out = bodies.map((coords, k) => ({ color: k, coords }));
@@ -368,8 +390,8 @@ function hintBodies(model, H) {
 }
 
 // The five bodies as binary STLs: [{color, buf}] (core last)
-function hintSTLs(model, H) {
-  return hintBodies(model, H).map(b => ({ color: b.color, buf: buildSTL(b.coords) }));
+function hintSTLs(model, H, frame) {
+  return hintBodies(model, H, frame).map(b => ({ color: b.color, buf: buildSTL(b.coords) }));
 }
 
 /* Single-file 3MF export of the hint cube. 3MF is a zip of XML: the core
@@ -393,8 +415,8 @@ function hintSTLs(model, H) {
      4-slot-AMS friendly).
    Slicers that know neither file still open five correctly placed
    colored objects via the core-spec basematerials. */
-function hint3MF(model, H, palette) {
-  const parts = hintBodies(model, H);
+function hint3MF(model, H, palette, frame) {
+  const parts = hintBodies(model, H, frame);
   const fmt = v => String(+v.toFixed(6));
   // deterministic, but shaped as RFC 4122 version-4/variant-1
   const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');

@@ -21,6 +21,7 @@ const state = {
   seed: 'cube-001',
   hintCube: false,  // add a small solid color-guide cube to the file set
   hintEdge: 30,     // its edge, mm
+  hintFrame: false, // core-colored frame around each face mosaic
   palette: [...DEFAULT_PALETTE],
   // face → relief config. Text: { mode:'text', t (multi-line), h, v, s, f }.
   // Image: { mode:'image', img (base64 jpeg, no data: prefix), h, v, s,
@@ -260,7 +261,10 @@ function stateToHash() {
   p.set('m', state.maxCell);
   p.set('seed', state.seed);
   if (!state.autoEdge) p.set('e', state.baseEdge);
-  if (state.hintCube && state.colors === 4) p.set('hc', state.hintEdge);
+  if (state.hintCube && state.colors === 4) {
+    p.set('hc', state.hintEdge);
+    if (state.hintFrame) p.set('hcf', '1');
+  }
   if (state.palette.join() !== DEFAULT_PALETTE.join())
     p.set('pal', state.palette.map(x => x.replace('#', '')).join('.'));
   for (const [face, cfg] of Object.entries(state.texts)) {
@@ -298,6 +302,7 @@ function applyHash() {
   }
   state.hintCube = p.has('hc');
   if (p.has('hc')) state.hintEdge = int(p.get('hc'), 20, 80, state.hintEdge);
+  state.hintFrame = p.get('hcf') === '1';
   if (p.has('pal')) {
     const parts = p.get('pal').split('.');
     if (parts.length === 4 && parts.every(x => /^[0-9a-fA-F]{6}$/.test(x)))
@@ -349,6 +354,7 @@ function syncUI() {
   $('#inp-seed').value = state.seed;
   $('#chk-hint').checked = state.hintCube;
   $('#inp-hint').value = state.hintEdge;
+  $('#chk-hint-frame').checked = state.hintFrame;
   $$('#color-pickers input').forEach((inp, k) => { inp.value = state.palette[k]; });
   loadTextUI();
 }
@@ -591,10 +597,10 @@ function renderFiles() {
     // single-file 3MF first: one object, parts pre-assigned to filaments
     const sw3 = `<i class="swatch" style="background:conic-gradient(${state.palette[0]} 25%,${state.palette[1]} 0 50%,${state.palette[2]} 0 75%,${state.palette[3]} 0)"></i>`;
     addRow(sw3, hint3MFName(), t('hintTag'), () =>
-      downloadBlob(new Blob([hint3MF(model, state.hintEdge, state.palette)], { type: 'model/3mf' }), hint3MFName()),
+      downloadBlob(new Blob([hint3MF(model, state.hintEdge, state.palette, state.hintFrame)], { type: 'model/3mf' }), hint3MFName()),
       '3MF ↓');
     count++;
-    for (const hf of hintSTLs(model, state.hintEdge)) {
+    for (const hf of hintSTLs(model, state.hintEdge, state.hintFrame)) {
       const sw = hf.color === null
         ? `<i class="swatch mono"></i>`
         : `<i class="swatch" style="background:${state.palette[hf.color]}"></i>`;
@@ -625,8 +631,8 @@ function downloadAll() {
     data: new Uint8Array(plateSTL(pl, model)),
   }));
   if (hintEnabled()) {
-    files.push({ name: hint3MFName(), data: hint3MF(model, state.hintEdge, state.palette) });
-    for (const hf of hintSTLs(model, state.hintEdge)) {
+    files.push({ name: hint3MFName(), data: hint3MF(model, state.hintEdge, state.palette, state.hintFrame) });
+    for (const hf of hintSTLs(model, state.hintEdge, state.hintFrame)) {
       files.push({ name: hintFileName(hf.color), data: new Uint8Array(hf.buf) });
     }
   }
@@ -783,6 +789,10 @@ function init() {
   };
   $('#chk-hint').addEventListener('change', () => {
     state.hintCube = $('#chk-hint').checked;
+    hintChanged();
+  });
+  $('#chk-hint-frame').addEventListener('change', () => {
+    state.hintFrame = $('#chk-hint-frame').checked;
     hintChanged();
   });
   $('#inp-hint').addEventListener('change', () => {
