@@ -377,16 +377,22 @@ function hintSTLs(model, H) {
    with basematerials giving each part its display color (the user's own
    palette).
 
-   Deliberately NO slicer-specific config inside. Bambu Studio / Orca
-   run their color-to-filament import flow for third-party 3MFs (each
-   triangle inherits the object's material color, and the import dialog
-   maps distinct colors to filaments, adding slots as needed) — but only
-   through the loader branch where no Metadata/model_settings.config is
-   present; shipping that config suppresses the color mapping and pins
-   parts to filament slots a fresh project does not have yet, which
-   renders the whole cube in a single color (verified against
-   BambuStudio's bbs_3mf.cpp importer). The components assembly still
-   loads as one five-part object either way. */
+   Bambu Studio / Orca additions (verified against their bbs_3mf.cpp
+   importer, which loads both files for third-party 3MFs too, gated only
+   on the user's "load settings" choice):
+   - Metadata/project_settings.config — a flat JSON config; we ship the
+     minimal keys defining FOUR filaments with the palette colors. This
+     is the piece that makes per-part assignments displayable at all:
+     their loader clamps any part extruder above the filament-list size
+     back to 1, and a fresh project has a single filament — without
+     this file every part collapses to filament #1 (the bug the user
+     hit twice).
+   - Metadata/model_settings.config — part list of the one object with
+     an extruder per part: colors 1-4 → filaments 1-4; the core shares
+     filament 1 (it is invisible inside; sharing keeps the print
+     4-slot-AMS friendly).
+   Slicers that know neither file still open five correctly placed
+   colored objects via the core-spec basematerials. */
 function hint3MF(model, H, palette) {
   const parts = hintBodies(model, H);
   const fmt = v => String(+v.toFixed(6));
@@ -444,11 +450,33 @@ function hint3MF(model, H, palette) {
     `<build p:UUID="${uuid(100)}"><item objectid="6" p:UUID="${uuid(101)}"/></build>` +
     `</model>`;
 
+  const settingsXml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n` +
+    `  <object id="6">\n` +
+    `    <metadata key="name" value="puzzle-hint-cube"/>\n` +
+    `    <metadata key="extruder" value="1"/>\n` +
+    parts.map((p, k) =>
+      `    <part id="${k + 1}" subtype="normal_part">\n` +
+      `      <metadata key="name" value="${names[k]}"/>\n` +
+      `      <metadata key="extruder" value="${p.color === null ? 1 : p.color + 1}"/>\n` +
+      `    </part>\n`).join('') +
+    `  </object>\n</config>\n`;
+
+  const projectSettings = JSON.stringify({
+    name: 'project_settings',
+    from: 'project',
+    version: '01.00.00.00',
+    filament_settings_id: ['Generic PLA', 'Generic PLA', 'Generic PLA', 'Generic PLA'],
+    filament_colour: [palette[0], palette[1], palette[2], palette[3]],
+    filament_type: ['PLA', 'PLA', 'PLA', 'PLA'],
+  }, null, 2);
+
   const contentTypes =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
     `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
     `<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>` +
+    `<Default Extension="config" ContentType="text/xml"/>` +
     `</Types>`;
 
   const rels =
@@ -463,6 +491,8 @@ function hint3MF(model, H, palette) {
     { name: '[Content_Types].xml', data: enc.encode(contentTypes) },
     { name: '_rels/.rels', data: enc.encode(rels) },
     { name: '3D/3dmodel.model', data: enc.encode(modelXml) },
+    { name: 'Metadata/model_settings.config', data: enc.encode(settingsXml) },
+    { name: 'Metadata/project_settings.config', data: enc.encode(projectSettings) },
   ]);
 }
 
