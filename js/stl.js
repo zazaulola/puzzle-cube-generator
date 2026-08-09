@@ -294,16 +294,15 @@ function buildTexturedPieceMesh(piece, model, c, t, clearance, emitRaw) {
      same body may overlap each other — slicers union shells per part;
      s ≤ f keeps neighboring faces' pockets clear of each other);
    - frameless (default): mosaics span the faces edge to edge, and the
-     colliding surface slabs along the cube edges are resolved with a
-     fixed "matchbox" priority — the z-faces own the full edges, the
-     y-faces yield to them, the x-faces yield to both — by clipping
-     each tile box to its face's allowed region. The visible cost is a
-     tile-depth-thin strip along each edge showing the neighbor face's
-     tile sides, much like the edge teeth of the real cube. */
+     colliding surface slabs along the cube edges are MITERED at 45°
+     like a picture frame: a shell point belongs to the face it is
+     closest to the surface of (the minimum-coordinate rule), so each
+     face's tiles reach exactly to the edge line, border tiles get a
+     45° bevel on their underside, and the bevels of adjacent faces'
+     tiles meet flush in the miter plane through the edge. Nothing of
+     any neighbor shows on a face; the core shrinks to the inner block. */
 const HINT_SHELL = 0.8; // tile depth, mm
 const HINT_FRAME = 1.2; // frame width around each face mosaic, mm (framed look)
-// frameless mode: world-axis clip per face (the matchbox priority)
-const HINT_CLIP = { T: '', Bo: '', F: 'z', B: 'z', L: 'yz', R: 'yz' };
 
 // Closed axis-aligned box, CCW from outside (12 triangles)
 function emitBox(coords, x0, y0, z0, x1, y1, z1) {
@@ -328,30 +327,49 @@ function hintRect(piece, d, PHI, faceIdx) {
     : { qu0: 2 * I + half, qu1: 2 * I + half + 1, qv0: 2 * J, qv1: 2 * J + 2 };
 }
 
-// Face-local mm rect (u,v ∈ [uu0,uu1]×[vv0,vv1], inward depth w ∈ [w0,w1])
-// → world axis-aligned box via the FACE_DEFS frame (all axes are ±unit).
-// clip: '' or a subset of 'yz' — world axes clamped to [s, H−s] (the
-// frameless matchbox priority; never clips a box away entirely, tiles
-// are far wider than the shell depth).
-function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1, clip) {
+// Inward-depth world mapper for a face: pt(u,v,w) with w measured inward
+// from the surface. NOTE: (U, V, −W) is orientation-REVERSING (det −1) —
+// emitters transforming local windings through pt must flip them.
+function facePt(fd, H) {
   const W = [
     fd.U[1] * fd.V[2] - fd.U[2] * fd.V[1],
     fd.U[2] * fd.V[0] - fd.U[0] * fd.V[2],
     fd.U[0] * fd.V[1] - fd.U[1] * fd.V[0],
   ];
-  const pt = (u, v, w) => [0, 1, 2].map(k => fd.O[k] * H + u * fd.U[k] + v * fd.V[k] - w * W[k]);
+  return (u, v, w) => [0, 1, 2].map(k => fd.O[k] * H + u * fd.U[k] + v * fd.V[k] - w * W[k]);
+}
+
+// Face-local mm rect (u,v ∈ [uu0,uu1]×[vv0,vv1], inward depth w ∈ [w0,w1])
+// → world axis-aligned box via the FACE_DEFS frame (all axes are ±unit).
+function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1) {
+  const pt = facePt(fd, H);
   const a = pt(uu0, vv0, w1), b = pt(uu1, vv1, w0);
-  const mn = [0, 1, 2].map(k => Math.min(a[k], b[k]));
-  const mx = [0, 1, 2].map(k => Math.max(a[k], b[k]));
-  const s = HINT_SHELL;
-  if (clip) {
-    for (const ax of clip) {
-      const k = ax === 'y' ? 1 : 2;
-      mn[k] = Math.max(mn[k], s);
-      mx[k] = Math.min(mx[k], H - s);
-    }
-  }
-  emitBox(coords, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
+  emitBox(coords,
+    Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]),
+    Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2]));
+}
+
+// Frameless tile: a shell prism whose sides lying on the face border are
+// MITERED — the underside recedes 45° (u = w), so the bottom rect is the
+// top rect inset by the shell depth on beveled sides only. All six faces
+// stay planar quads (the u/v of a slanted side depends on w alone), so
+// the tile is a closed 12-triangle solid just like a box.
+// bev: {u0, u1, v0, v1} — which sides sit on the face border.
+function faceTilePrism(coords, fd, H, uu0, vv0, uu1, vv1, s, bev) {
+  const pt = facePt(fd, H);
+  const u0b = uu0 + (bev.u0 ? s : 0), u1b = uu1 - (bev.u1 ? s : 0);
+  const v0b = vv0 + (bev.v0 ? s : 0), v1b = vv1 - (bev.v1 ? s : 0);
+  const T00 = pt(uu0, vv0, 0), T10 = pt(uu1, vv0, 0), T11 = pt(uu1, vv1, 0), T01 = pt(uu0, vv1, 0);
+  const B00 = pt(u0b, v0b, s), B10 = pt(u1b, v0b, s), B11 = pt(u1b, v1b, s), B01 = pt(u0b, v1b, s);
+  // quads wound outward in the LOCAL (u,v,w) frame; pt() reverses
+  // orientation, so emit each quad's triangles with swapped order
+  const q = (a, b, c2, d2) => coords.push(...a, ...c2, ...b, ...a, ...d2, ...c2);
+  q(T00, T01, T11, T10); // outer surface (w=0)
+  q(B00, B10, B11, B01); // underside (w=s)
+  q(T00, T10, B10, B00); // v-low side
+  q(T01, B01, B11, T11); // v-high side
+  q(T00, B00, B01, T01); // u-low side
+  q(T10, T11, B11, B10); // u-high side
 }
 
 // The five bodies as raw triangle soups: [{color: 0..3, coords}, ...,
@@ -367,9 +385,14 @@ function hintBodies(model, H, frame) {
   const bodies = [[], [], [], []];
   for (const p of model.pieces) {
     const r = hintRect(p, d, PHI, faceIdx);
-    faceBox(bodies[p.color], byFace[p.face], H,
-      f + r.qu0 * q, f + r.qv0 * q, f + r.qu1 * q, f + r.qv1 * q, 0, s,
-      frame ? '' : HINT_CLIP[p.face]);
+    if (frame) {
+      faceBox(bodies[p.color], byFace[p.face], H,
+        f + r.qu0 * q, f + r.qv0 * q, f + r.qu1 * q, f + r.qv1 * q, 0, s);
+    } else {
+      faceTilePrism(bodies[p.color], byFace[p.face], H,
+        r.qu0 * q, r.qv0 * q, r.qu1 * q, r.qv1 * q, s,
+        { u0: r.qu0 === 0, u1: r.qu1 === Q, v0: r.qv0 === 0, v1: r.qv1 === Q });
+    }
   }
 
   const core = [];
