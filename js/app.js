@@ -562,17 +562,18 @@ function hintFileName(k) { // k = 0..3 color index, null = core body
   const d = state.difficulty;
   return k === null ? `cube_d${d}_hint_core.stl` : `cube_d${d}_hint_${COLOR_NAMES[k]}.stl`;
 }
+const hint3MFName = () => `cube_d${state.difficulty}_hint.3mf`;
 
 function renderFiles() {
   const list = $('#file-list');
   list.innerHTML = '';
-  const addRow = (swHtml, name, note, onDl) => {
+  const addRow = (swHtml, name, note, onDl, label = 'STL ↓') => {
     const row = document.createElement('div');
     row.className = 'file-row';
     row.innerHTML = `${swHtml}<code>${name}</code><span>${note}</span>`;
     const btn = document.createElement('button');
     btn.className = 'dl-btn';
-    btn.textContent = 'STL ↓';
+    btn.textContent = label;
     btn.addEventListener('click', onDl);
     row.appendChild(btn);
     list.appendChild(row);
@@ -587,6 +588,12 @@ function renderFiles() {
   // the hint-cube option only makes sense for the 4-color puzzle
   $('#hint-row').style.display = state.colors === 4 ? '' : 'none';
   if (hintEnabled()) {
+    // single-file 3MF first: one object, parts pre-assigned to filaments
+    const sw3 = `<i class="swatch" style="background:conic-gradient(${state.palette[0]} 25%,${state.palette[1]} 0 50%,${state.palette[2]} 0 75%,${state.palette[3]} 0)"></i>`;
+    addRow(sw3, hint3MFName(), t('hintTag'), () =>
+      downloadBlob(new Blob([hint3MF(model, state.hintEdge, state.palette)], { type: 'model/3mf' }), hint3MFName()),
+      '3MF ↓');
+    count++;
     for (const hf of hintSTLs(model, state.hintEdge)) {
       const sw = hf.color === null
         ? `<i class="swatch mono"></i>`
@@ -618,6 +625,7 @@ function downloadAll() {
     data: new Uint8Array(plateSTL(pl, model)),
   }));
   if (hintEnabled()) {
+    files.push({ name: hint3MFName(), data: hint3MF(model, state.hintEdge, state.palette) });
     for (const hf of hintSTLs(model, state.hintEdge)) {
       files.push({ name: hintFileName(hf.color), data: new Uint8Array(hf.buf) });
     }

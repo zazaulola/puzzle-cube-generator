@@ -335,8 +335,9 @@ function faceBox(coords, fd, H, uu0, vv0, uu1, vv1, w0, w1) {
     Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2]));
 }
 
-// The five bodies: [{color: 0..3, buf}, ..., {color: null, buf}] (core last)
-function hintSTLs(model, H) {
+// The five bodies as raw triangle soups: [{color: 0..3, coords}, ...,
+// {color: null, coords}] (core last) — shared by the STL and 3MF exports
+function hintBodies(model, H) {
   const d = model.difficulty;
   const PHI = solveFacePhases(d);
   const faceIdx = Object.fromEntries(FACE_DEFS.map((fd, k) => [fd.name, k]));
@@ -361,9 +362,118 @@ function hintSTLs(model, H) {
     faceBox(core, fd, H, H - f, f, H, H - f, 0, s); // u-high strip
   }
 
-  const out = bodies.map((coords, k) => ({ color: k, buf: buildSTL(coords) }));
-  out.push({ color: null, buf: buildSTL(core) });
+  const out = bodies.map((coords, k) => ({ color: k, coords }));
+  out.push({ color: null, coords: core });
   return out;
+}
+
+// The five bodies as binary STLs: [{color, buf}] (core last)
+function hintSTLs(model, H) {
+  return hintBodies(model, H).map(b => ({ color: b.color, buf: buildSTL(b.coords) }));
+}
+
+/* Single-file 3MF export of the hint cube. 3MF is a zip of XML: the core
+   spec carries all five meshes as objects assembled into one build item,
+   with basematerials giving each part its display color (the user's own
+   palette). On top of that, Metadata/model_settings.config — the config
+   file Bambu Studio / Orca read — declares the five meshes as PARTS of
+   one object with a filament ("extruder") preassigned per part: colors
+   1–4 map to AMS slots 1–4, the core defaults to slot 1. Slicers that
+   ignore the config still open five correctly placed colored objects. */
+function hint3MF(model, H, palette) {
+  const parts = hintBodies(model, H);
+  const fmt = v => String(+v.toFixed(6));
+  // deterministic, but shaped as RFC 4122 version-4/variant-1
+  const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
+  const CORE_COLOR = '#9e9e9e';
+  const names = parts.map(p => (p.color === null ? 'core' : 'color-' + (p.color + 1)));
+
+  let res = '';
+  parts.forEach((part, k) => {
+    const verts = [];
+    let tris = '';
+    const c = part.coords;
+    for (let b = 0; b < c.length; b += 108) { // 12 triangles per box
+      /* vertex welding is scoped PER BOX: each cuboid stays its own closed
+         shell with exactly-two-triangles-per-edge, satisfying the core
+         spec's manifold-edge rule — welding across touching boxes would
+         create edges shared by four triangles */
+      const vmap = new Map();
+      const idxOf = o => {
+        const key = fmt(c[o]) + '|' + fmt(c[o + 1]) + '|' + fmt(c[o + 2]);
+        let idx = vmap.get(key);
+        if (idx === undefined) { idx = verts.length; verts.push(key); vmap.set(key, idx); }
+        return idx;
+      };
+      for (let o = b; o < Math.min(b + 108, c.length); o += 9) {
+        tris += `<triangle v1="${idxOf(o)}" v2="${idxOf(o + 3)}" v3="${idxOf(o + 6)}"/>`;
+      }
+    }
+    res += `<object id="${k + 1}" p:UUID="${uuid(k + 1)}" type="model" pid="9" pindex="${k}"><mesh><vertices>`;
+    res += verts.map(v => {
+      const [x, y, z] = v.split('|');
+      return `<vertex x="${x}" y="${y}" z="${z}"/>`;
+    }).join('');
+    res += `</vertices><triangles>${tris}</triangles></mesh></object>`;
+  });
+
+  const mats = parts.map((p, k) =>
+    `<base name="${names[k]}" displaycolor="${p.color === null ? CORE_COLOR : palette[p.color]}"/>`).join('');
+  const comps = parts.map((p, k) =>
+    `<component objectid="${k + 1}" p:UUID="${uuid(20 + k)}"/>`).join('');
+
+  const modelXml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<model unit="millimeter" xml:lang="en-US"` +
+    ` xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"` +
+    ` xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"` +
+    ` xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">` +
+    `<metadata name="Application">puzzle-cube-generator</metadata>` +
+    `<metadata name="BambuStudio:3mfVersion">1</metadata>` +
+    `<resources>` +
+    `<basematerials id="9">${mats}</basematerials>` +
+    res +
+    `<object id="6" p:UUID="${uuid(6)}" type="model"><components>${comps}</components></object>` +
+    `</resources>` +
+    // printable="1" is a de-facto BambuStudio attribute (their own writer
+    // emits it unprefixed); harmless for core-spec consumers
+    `<build p:UUID="${uuid(100)}"><item objectid="6" p:UUID="${uuid(101)}" printable="1"/></build>` +
+    `</model>`;
+
+  const settingsXml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n` +
+    `  <object id="6">\n` +
+    `    <metadata key="name" value="puzzle-hint-cube"/>\n` +
+    `    <metadata key="extruder" value="1"/>\n` +
+    parts.map((p, k) =>
+      `    <part id="${k + 1}" subtype="normal_part">\n` +
+      `      <metadata key="name" value="${names[k]}"/>\n` +
+      `      <metadata key="extruder" value="${p.color === null ? 1 : p.color + 1}"/>\n` +
+      `    </part>\n`).join('') +
+    `  </object>\n</config>\n`;
+
+  const contentTypes =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+    `<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>` +
+    `<Default Extension="config" ContentType="text/xml"/>` +
+    `</Types>`;
+
+  const rels =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Target="/3D/3dmodel.model" Id="rel-1"` +
+    ` Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>` +
+    `</Relationships>`;
+
+  const enc = new TextEncoder();
+  return buildZipBytes([
+    { name: '[Content_Types].xml', data: enc.encode(contentTypes) },
+    { name: '_rels/.rels', data: enc.encode(rels) },
+    { name: '3D/3dmodel.model', data: enc.encode(modelXml) },
+    { name: 'Metadata/model_settings.config', data: enc.encode(settingsXml) },
+  ]);
 }
 
 // Binary STL from a flat coordinate array (9 numbers per triangle)
@@ -440,8 +550,8 @@ function crc32(data) {
   for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]) & 0xFF] ^ (c >>> 8);
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
-// files: [{name, data: Uint8Array}]
-function buildZip(files) {
+// files: [{name, data: Uint8Array}] → zip bytes (store, no compression)
+function buildZipBytes(files) {
   const encoder = new TextEncoder();
   const localParts = [], centralParts = [];
   let offset = 0;
@@ -473,5 +583,14 @@ function buildZip(files) {
   ev.setUint32(0, 0x06054b50, true);
   ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
   ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
-  return new Blob([...localParts, ...centralParts, new Uint8Array(end)], { type: 'application/zip' });
+  const all = [...localParts, ...centralParts, new Uint8Array(end)];
+  let total = 0;
+  for (const p of all) total += p.length;
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const p of all) { out.set(p, pos); pos += p.length; }
+  return out;
+}
+function buildZip(files) {
+  return new Blob([buildZipBytes(files)], { type: 'application/zip' });
 }
