@@ -504,6 +504,8 @@ function renderAll() {
   drawNet($('#net-canvas'), model, state.palette, state.colors);
   renderPlates();
   renderFiles();
+  if ($('#view-hint').style.display !== 'none' && hintEnabled())
+    drawHint($('#hint-canvas'), model, state.palette, state.hintEdge, state.hintFrame);
 }
 
 function renderStats() {
@@ -593,6 +595,12 @@ function renderFiles() {
   let count = plates.length;
   // the hint-cube option only makes sense for the 4-color puzzle
   $('#hint-row').style.display = state.colors === 4 ? '' : 'none';
+  // the hint preview tab follows the checkbox; leaving the tab while it
+  // is active falls back to the net view
+  const tabHint = $('#tab-hint');
+  tabHint.style.display = hintEnabled() ? '' : 'none';
+  if (!hintEnabled() && tabHint.classList.contains('on'))
+    $$('.tab').find(x => x.dataset.view === 'net').click();
   if (hintEnabled()) {
     // single-file 3MF first: one object, parts pre-assigned to filaments
     const sw3 = `<i class="swatch" style="background:conic-gradient(${state.palette[0]} 25%,${state.palette[1]} 0 50%,${state.palette[2]} 0 75%,${state.palette[3]} 0)"></i>`;
@@ -782,10 +790,12 @@ function init() {
     scaleTimer = setTimeout(saveTextUI, 200);
   });
 
-  // hint cube: no model rebuild needed — just the hash and the file list
+  // hint cube: no model rebuild needed — just the hash, files and preview
   const hintChanged = () => {
     history.replaceState(null, '', '#' + stateToHash());
     renderFiles();
+    if ($('#view-hint').style.display !== 'none' && hintEnabled())
+      drawHint($('#hint-canvas'), model, state.palette, state.hintEdge, state.hintFrame);
   };
   $('#chk-hint').addEventListener('change', () => {
     state.hintCube = $('#chk-hint').checked;
@@ -825,15 +835,18 @@ function init() {
   $$('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
       $$('.tab').forEach(x => x.classList.toggle('on', x === tab));
-      const isNet = tab.dataset.view === 'net';
-      $('#view-net').style.display = isNet ? 'block' : 'none';
-      $('#view-plates').style.display = isNet ? 'none' : 'block';
+      const view = tab.dataset.view;
+      $('#view-net').style.display = view === 'net' ? 'block' : 'none';
+      $('#view-plates').style.display = view === 'plates' ? 'block' : 'none';
+      $('#view-hint').style.display = view === 'hint' ? 'block' : 'none';
       const bar = $('.statbar');
-      bar.classList.toggle('mode-net', isNet);
-      bar.classList.toggle('mode-plates', !isNet);
+      bar.classList.toggle('mode-net', view === 'net');
+      bar.classList.toggle('mode-plates', view === 'plates');
+      bar.classList.toggle('mode-hint', view === 'hint');
       if (!model) return;
-      if (isNet) drawNet($('#net-canvas'), model, state.palette, state.colors);
-      else renderPlates();
+      if (view === 'net') drawNet($('#net-canvas'), model, state.palette, state.colors);
+      else if (view === 'plates') renderPlates();
+      else drawHint($('#hint-canvas'), model, state.palette, state.hintEdge, state.hintFrame);
     });
   });
 

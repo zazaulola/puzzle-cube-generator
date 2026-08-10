@@ -146,6 +146,120 @@ function drawNet(canvas, model, palette, colorsCount) {
   ctx.fillText(model.L.toFixed(0) + ' ' + t('mm'), ox + model.L * s / 2, yDim + 12);
 }
 
+/* Hint cube preview: two isometric views covering all six faces.
+   View 1 shows Top/Front/Right; view 2 is the cube given a PROPER 180°
+   rotation about the horizontal diagonal (x,y,z)→(y,x,H−z), which lands
+   Bottom/Left/Back into the same three visible slots — no mirroring.
+   Mosaics come from the same nominal rects as the exported hint cube. */
+const HINT_CORE_COLOR = '#9e9e9e';
+
+function shadeHex(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = v => Math.round(Math.max(0, Math.min(255, v * k)));
+  return `rgb(${ch(n >> 16)},${ch((n >> 8) & 255)},${ch(n & 255)})`;
+}
+
+function drawHint(canvas, model, palette, H, frame) {
+  const box = (canvas.closest('.view') || canvas.parentElement).getBoundingClientRect();
+  const cssW = Math.max(320, box.width - 62);
+  const d = model.difficulty, Q = 2 * d;
+  const PHI = solveFacePhases(d);
+  const faceIdx = Object.fromEntries(FACE_DEFS.map((fd, k) => [fd.name, k]));
+  const byFace = Object.fromEntries(FACE_DEFS.map(fd => [fd.name, fd]));
+  const f = frame ? HINT_FRAME : 0;
+  const q = (H - 2 * f) / Q;
+
+  const tiles = {}; // face name → [{r, color}]
+  for (const p of model.pieces) {
+    (tiles[p.face] = tiles[p.face] || []).push({ r: hintRect(p, d, PHI, faceIdx), color: p.color });
+  }
+
+  const c30 = Math.cos(Math.PI / 6), s30 = 0.5;
+  const cubeW = 2 * H * c30, cubeH = 2 * H;
+  const gap = cubeW * 0.3;
+  const pad = 24;
+  const scale = Math.min((cssW - 2 * pad) / (2 * cubeW + gap), 300 / cubeH);
+  const cssH = cubeH * scale + 74;
+  const ctx = setupCanvas(canvas, cssW, cssH);
+  ctx.clearRect(0, 0, cssW, cssH);
+  const css = getComputedStyle(document.documentElement);
+  const ink = css.getPropertyValue('--ink-faint').trim() || '#5b6572';
+  const lineCol = css.getPropertyValue('--bg-deep').trim() || '#0c1014';
+  const accent = css.getPropertyValue('--accent').trim() || '#ffb454';
+
+  const totalW = (2 * cubeW + gap) * scale;
+  const x0 = (cssW - totalW) / 2;
+  // per-view: proper transform + which faces land in the T/F/R slots
+  const views = [
+    { tf: p => p, slots: { T: 'T', F: 'F', R: 'R' } },
+    { tf: p => [p[1], p[0], H - p[2]], slots: { T: 'Bo', F: 'L', R: 'B' } },
+  ];
+  const shade = { T: 1.0, F: 0.84, R: 0.68 };
+
+  views.forEach((view, vi) => {
+    const cx = x0 + vi * (cubeW + gap) * scale + cubeW * scale / 2;
+    const oy = 16;
+    // axonometric view from the front-top-right corner (direction ~(1,−1,1)):
+    // shows the T/F/R slots as a connected hexagon
+    const proj = p => {
+      const t2 = view.tf(p);
+      return [cx + (t2[0] + t2[1] - H) * c30 * scale,
+              oy + ((t2[0] - t2[1] + H) * s30 + (H - t2[2])) * scale];
+    };
+    const facePath = (fd, uu0, vv0, uu1, vv1) => {
+      const pt = (uu, vv) => proj([0, 1, 2].map(k => fd.O[k] * H + uu * fd.U[k] + vv * fd.V[k]));
+      const P = [pt(uu0, vv0), pt(uu1, vv0), pt(uu1, vv1), pt(uu0, vv1)];
+      ctx.beginPath();
+      P.forEach((p2, k2) => k2 === 0 ? ctx.moveTo(p2[0], p2[1]) : ctx.lineTo(p2[0], p2[1]));
+      ctx.closePath();
+    };
+    for (const slot of ['T', 'F', 'R']) {
+      const faceName = view.slots[slot];
+      const fd = byFace[faceName];
+      const k = shade[slot];
+      if (frame) {
+        facePath(fd, 0, 0, H, H);
+        ctx.fillStyle = shadeHex(HINT_CORE_COLOR, k);
+        ctx.fill();
+      }
+      for (const tl of tiles[faceName] || []) {
+        facePath(fd,
+          f + tl.r.qu0 * q, f + tl.r.qv0 * q,
+          f + tl.r.qu1 * q, f + tl.r.qv1 * q);
+        ctx.fillStyle = shadeHex(palette[tl.color], k);
+        ctx.fill();
+        ctx.strokeStyle = lineCol;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+      facePath(fd, 0, 0, H, H);
+      ctx.strokeStyle = lineCol;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    // caption: which faces this view shows
+    ctx.fillStyle = ink;
+    ctx.font = '10px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center';
+    const names = ['T', 'F', 'R'].map(s => t('face_' + view.slots[s])).join(' · ');
+    ctx.fillText(names.toUpperCase(), cx, oy + cubeH * scale + 16);
+  });
+
+  // dimension line under the first cube
+  const dimY = 16 + cubeH * scale + 30;
+  const dx0 = x0, dx1 = x0 + cubeW * scale;
+  ctx.strokeStyle = accent; ctx.fillStyle = accent;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(dx0, dimY); ctx.lineTo(dx1, dimY);
+  ctx.moveTo(dx0, dimY - 4); ctx.lineTo(dx0, dimY + 4);
+  ctx.moveTo(dx1, dimY - 4); ctx.lineTo(dx1, dimY + 4);
+  ctx.stroke();
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(H + ' ' + t('mm'), (dx0 + dx1) / 2, dimY + 12);
+}
+
 // A single plate
 function drawPlate(canvas, plate, thickness, palette, colorsCount, maxCss) {
   const cssW = maxCss;

@@ -228,6 +228,10 @@ body {
 .statbar.mode-net .st-plates { display: none; }
 .statbar.mode-plates .st-seed,
 .statbar.mode-plates .st-unique { display: none; }
+.statbar.mode-hint .st-cell,
+.statbar.mode-hint .st-thick,
+.statbar.mode-hint .st-unique,
+.statbar.mode-hint .st-plates { display: none; }
 .stat span { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-faint); }
 .stat span em { font-style: normal; color: var(--warn); }
 .tabs { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 0 16px; }
@@ -245,6 +249,8 @@ body {
 #net-fix { position: absolute; left: 0; top: 0; display: none; pointer-events: none; }
 body.debug #net-fix { display: block; }
 #plates-grid { display: flex; flex-wrap: wrap; gap: 18px; }
+.hint-wrap { margin: 0 auto; width: fit-content; max-width: 100%; }
+#hint-canvas { display: block; max-width: 100%; }
 .plate-card {
   background: var(--panel); border: 1px solid var(--line);
   padding: 8px;
