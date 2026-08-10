@@ -250,7 +250,7 @@ body {
 body.debug #net-fix { display: block; }
 #plates-grid { display: flex; flex-wrap: wrap; gap: 18px; }
 .hint-wrap { margin: 0 auto; width: fit-content; max-width: 100%; }
-#hint-canvas { display: block; max-width: 100%; }
+#hint-canvas { display: block; max-width: 100%; touch-action: none; }
 .plate-card {
   background: var(--panel); border: 1px solid var(--line);
   padding: 8px;
