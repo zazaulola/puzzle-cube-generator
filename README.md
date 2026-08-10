@@ -34,6 +34,8 @@ Runs entirely in the browser — no server, no dependencies. Outputs binary STL 
 - **Single 3MF** (recommended): one file carrying all five meshes as parts of one object, with display colors from your palette (3MF base materials). For Bambu Studio / OrcaSlicer the package also defines **four project filaments in the palette colors** and assigns one to each part (core shares filament 1) — choose "load with settings" when opening and the cube arrives ready to print. The filament list inside the file is the load-bearing piece: without it Bambu clamps every part assignment down to the single filament of a fresh project and the whole cube shows one color. Other slicers ignore the config files and open five correctly placed colored objects.
 - **Five STLs** sharing one coordinate space: import together, merge into one multi-part object ("Yes" in the slicer dialog), assign filaments manually.
 
+The **PLATES** tab shows an interactive 3D view of the selected plate — pieces as extruded solids on the print bed (in the real 45°×45° pose when tilted printing is on), with the same drag-to-rotate control and idle turntable as the hint-cube view; click a plate card below to switch plates.
+
 Every configuration has a **shareable link**: the URL hash encodes the whole quest (`#d=2&c=4&k=1&o=flat&m=6&seed=…`) — the 🔗 button copies it, and opening such a link restores the exact same puzzle. Appending `&dbg=1` (or `?debug`) reveals the hidden fixator markers on the net preview: dot = bump, ring = socket.
 
 The piece thickness always equals the puzzle cell (`edge / 8d`), which is what makes the edge joints flush.

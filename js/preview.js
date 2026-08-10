@@ -323,33 +323,34 @@ function asmFaceTextures(model, palette) {
   return cvs;
 }
 
-function hintBindPointer(canvas) {
-  if (HINT3D.bound) return;
-  HINT3D.bound = true;
+// shared "grab the surface" trackball: dragging right moves the front
+// toward +rotY, dragging down tips the top toward the viewer (+rotX;
+// screen y grows downward). st needs {R, dragging, lastPointer, lastTouch}.
+function bindSpin(canvas, st) {
+  if (st.bound) return;
+  st.bound = true;
   canvas.style.cursor = 'grab';
   canvas.addEventListener('pointerdown', ev => {
-    HINT3D.dragging = true;
-    HINT3D.lastPointer = [ev.clientX, ev.clientY];
-    HINT3D.lastTouch = performance.now();
-    canvas.setPointerCapture(ev.pointerId);
+    st.dragging = true;
+    st.lastPointer = [ev.clientX, ev.clientY];
+    st.lastTouch = performance.now();
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic events */ }
     canvas.style.cursor = 'grabbing';
     ev.preventDefault();
   });
   canvas.addEventListener('pointermove', ev => {
-    if (!HINT3D.dragging) return;
-    const dx = ev.clientX - HINT3D.lastPointer[0];
-    const dy = ev.clientY - HINT3D.lastPointer[1];
-    HINT3D.lastPointer = [ev.clientX, ev.clientY];
-    HINT3D.lastTouch = performance.now();
-    // screen-space trackball, "grab the surface" feel: dragging right
-    // moves the front face right (+rotY), dragging down tips the top
-    // toward the viewer (+rotX; screen y grows downward)
-    HINT3D.R = m3mul(m3rotX(dy * 0.008), m3mul(m3rotY(dx * 0.008), HINT3D.R));
+    if (!st.dragging) return;
+    const dx = ev.clientX - st.lastPointer[0];
+    const dy = ev.clientY - st.lastPointer[1];
+    st.lastPointer = [ev.clientX, ev.clientY];
+    st.lastTouch = performance.now();
+    st.R = m3mul(m3rotX(dy * 0.008), m3mul(m3rotY(dx * 0.008), st.R));
   });
-  const up = () => { HINT3D.dragging = false; HINT3D.lastTouch = performance.now(); canvas.style.cursor = 'grab'; };
+  const up = () => { st.dragging = false; st.lastTouch = performance.now(); canvas.style.cursor = 'grab'; };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 }
+const hintBindPointer = canvas => bindSpin(canvas, HINT3D);
 
 function hintFrame3D(now) {
   const st = HINT3D;
@@ -457,6 +458,186 @@ function drawHint(canvas, model, palette, H, frame) {
   hintBindPointer(canvas);
   canvas.__w = -1; // force resize on next frame
   if (!HINT3D.raf) HINT3D.raf = requestAnimationFrame(hintFrame3D);
+}
+
+/* Interactive 3D view of one print plate: pieces as extruded prisms on
+   the bed, same trackball + idle turntable as the hint cubes. Pieces are
+   rendered as bottom cap → depth-sorted side walls → top cap (painter's
+   algorithm; the pieces themselves are depth-sorted by centroid, and
+   they never overlap in XY on the bed, so this ordering is exact enough
+   for a preview). Tilted plates get the real 45°×45° pose. Sub-mm
+   details (fixators, text relief) are intentionally omitted. */
+const PLATE3D = {
+  raf: 0, canvas: null, scene: null,
+  R: null, dragging: false, lastPointer: null, lastTouch: 0, bound: false,
+};
+
+function plateInitR() {
+  // bird's-eye view of the bed, slicer-style: top view pitched back
+  return m3mul(m3rotX(0.95), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+}
+
+function plateFrame3D(now) {
+  const st = PLATE3D;
+  const canvas = st.canvas;
+  if (!canvas || !canvas.isConnected || canvas.offsetParent === null) { st.raf = 0; return; }
+  if (!st.dragging && now - st.lastTouch > 2500) {
+    st.R = m3mul(st.R, m3rotZ(0.0035)); // turntable about the bed's vertical
+  }
+  const { pieces, bedW, bedH, label } = st.scene;
+  const box = (canvas.closest('.view') || canvas.parentElement).getBoundingClientRect();
+  const cssW = Math.max(300, box.width - 62);
+  const D = Math.min(cssW - 30, 560);
+  const cssH = Math.min(440, D * 0.72) + 46;
+  if (canvas.__w !== cssW || canvas.__h !== cssH) {
+    setupCanvas(canvas, cssW, cssH);
+    canvas.__w = cssW; canvas.__h = cssH;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  const css = getComputedStyle(document.documentElement);
+  const ink = css.getPropertyValue('--ink-faint').trim() || '#5b6572';
+  const bedFill = css.getPropertyValue('--bg-deep').trim() || '#0c1014';
+  const bedLine = css.getPropertyValue('--line-strong').trim() || '#34414f';
+
+  const cx = cssW / 2, cy = (cssH - 30) / 2 + 8;
+  const scale = D / Math.hypot(bedW, bedH);
+  const ctr = [bedW / 2, bedH / 2, 0];
+  const proj = p => {
+    const v = m3vec(st.R, [p[0] - ctr[0], p[1] - ctr[1], p[2] - ctr[2]]);
+    return [cx + v[0] * scale, cy - v[1] * scale, v[2]];
+  };
+
+  // the bed (drawn first when seen from above; covers pieces from below)
+  const bedUp = m3vec(st.R, [0, 0, 1])[2] > 0;
+  const drawBed = () => {
+    const C = [proj([0, 0, 0]), proj([bedW, 0, 0]), proj([bedW, bedH, 0]), proj([0, bedH, 0])];
+    ctx.beginPath();
+    C.forEach((p, i) => i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]));
+    ctx.closePath();
+    ctx.fillStyle = bedFill;
+    ctx.fill();
+    ctx.strokeStyle = bedLine;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(120,140,160,0.13)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let g = 50; g < bedW; g += 50) {
+      const a = proj([g, 0, 0]), b = proj([g, bedH, 0]);
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    }
+    for (let g = 50; g < bedH; g += 50) {
+      const a = proj([0, g, 0]), b = proj([bedW, g, 0]);
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    }
+    ctx.stroke();
+  };
+  if (bedUp) drawBed();
+
+  // pieces, far to near
+  const order = pieces.map((pc, i) => {
+    const v = m3vec(st.R, [pc.ctr[0] - ctr[0], pc.ctr[1] - ctr[1], pc.ctr[2] - ctr[2]]);
+    return [v[2], i];
+  }).sort((a, b) => a[0] - b[0]);
+  for (const [, pi] of order) {
+    const pc = pieces[pi];
+    const n = pc.B.length;
+    const B = pc.B.map(proj), T = pc.T.map(proj);
+    // piece axis (bottom→top) in view space decides which cap is near
+    const axis = m3vec(st.R, pc.axis);
+    const topNear = axis[2] > 0;
+    const capPath = P => {
+      ctx.beginPath();
+      P.forEach((p, i) => i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]));
+      ctx.closePath();
+    };
+    // far cap
+    capPath(topNear ? B : T);
+    ctx.fillStyle = shadeHex(pc.color, 0.5);
+    ctx.fill();
+    // walls, far to near (depth = mean view z of the wall's corners)
+    const walls = [];
+    for (let i2 = 0; i2 < n; i2++) {
+      const j2 = (i2 + 1) % n;
+      walls.push([ (B[i2][2] + B[j2][2] + T[i2][2] + T[j2][2]) / 4, i2, j2 ]);
+    }
+    walls.sort((a, b) => a[0] - b[0]);
+    for (const [, i2, j2] of walls) {
+      // lambert-ish: wall normal from the 3D edge × axis
+      const ex = pc.B3[j2][0] - pc.B3[i2][0], ey = pc.B3[j2][1] - pc.B3[i2][1], ez = pc.B3[j2][2] - pc.B3[i2][2];
+      const nx = ey * pc.axis[2] - ez * pc.axis[1];
+      const ny = ez * pc.axis[0] - ex * pc.axis[2];
+      const nz = ex * pc.axis[1] - ey * pc.axis[0];
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      const nvz = m3vec(st.R, [nx / nl, ny / nl, nz / nl])[2];
+      const k = 0.45 + 0.4 * Math.max(0, nvz);
+      ctx.beginPath();
+      ctx.moveTo(B[i2][0], B[i2][1]);
+      ctx.lineTo(B[j2][0], B[j2][1]);
+      ctx.lineTo(T[j2][0], T[j2][1]);
+      ctx.lineTo(T[i2][0], T[i2][1]);
+      ctx.closePath();
+      ctx.fillStyle = shadeHex(pc.color, k);
+      ctx.fill();
+    }
+    // near cap + outline
+    capPath(topNear ? T : B);
+    ctx.fillStyle = shadeHex(pc.color, topNear ? 1.0 : 0.62);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(6,9,12,0.8)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  if (!bedUp) drawBed();
+
+  ctx.fillStyle = ink;
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${label} · ${bedW}×${bedH} ${t('mm')}`, cssW / 2, cssH - 22);
+  ctx.font = '9px "IBM Plex Mono", monospace';
+  ctx.fillText(t('hintDragTip'), cssW / 2, cssH - 8);
+
+  st.raf = requestAnimationFrame(plateFrame3D);
+}
+
+// (Re)initializes the 3D plate scene; rotation survives plate switches.
+function drawPlate3D(canvas, plate, model, palette, colorsCount, label) {
+  PLATE3D.canvas = canvas;
+  if (!PLATE3D.R) PLATE3D.R = plateInitR();
+  const t2 = model.t;
+  const pieces = plate.pieces.map(pc => {
+    const poly = pc.piece.poly;
+    let B3, T3, axis;
+    if (pc.tilt) {
+      const rB = poly.map(p => tilt45(p[0], p[1], 0));
+      const rT = poly.map(p => tilt45(p[0], p[1], t2));
+      let zmin = Infinity;
+      for (const v of rB) zmin = Math.min(zmin, v[2]);
+      for (const v of rT) zmin = Math.min(zmin, v[2]);
+      B3 = rB.map(v => [v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - zmin]);
+      T3 = rT.map(v => [v[0] + pc.tilt.dx, v[1] + pc.tilt.dy, v[2] - zmin]);
+      const a0 = tilt45(0, 0, 0), a1 = tilt45(0, 0, 1);
+      axis = [a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]];
+    } else {
+      B3 = poly.map(p => [p[0] + pc.dx, p[1] + pc.dy, 0]);
+      T3 = poly.map(p => [p[0] + pc.dx, p[1] + pc.dy, t2]);
+      axis = [0, 0, 1];
+    }
+    let sx = 0, sy = 0, sz = 0;
+    for (const v of B3) { sx += v[0]; sy += v[1]; sz += v[2]; }
+    return {
+      B3, T3, axis,
+      B: B3, T: T3, // projected in-frame (aliases; proj() maps per frame)
+      ctr: [sx / B3.length, sy / B3.length, sz / B3.length + t2 / 2],
+      color: colorsCount === 4 ? palette[pc.piece.color] : palette[0],
+    };
+  });
+  PLATE3D.scene = { pieces, bedW: plate.bedW, bedH: plate.bedH, label };
+  bindSpin(canvas, PLATE3D);
+  canvas.__w = -1;
+  if (!PLATE3D.raf) PLATE3D.raf = requestAnimationFrame(plateFrame3D);
 }
 
 // A single plate

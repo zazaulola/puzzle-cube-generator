@@ -543,6 +543,17 @@ function plateFileName(pl) {
   return `cube_d${d}_${k}x${c}_plate${pl.index + 1}.stl`;
 }
 
+let curPlate = 0;
+
+function drawCurPlate3D() {
+  if (!plates.length) return;
+  curPlate = Math.min(curPlate, plates.length - 1);
+  const pl = plates[curPlate];
+  drawPlate3D($('#plate3d-canvas'), pl, model, state.palette, state.colors, plateLabel(pl));
+  $$('#plates-grid .plate-card').forEach((card, k) =>
+    card.classList.toggle('sel', k === curPlate));
+}
+
 function renderPlates() {
   const wrap = $('#plates-grid');
   wrap.innerHTML = '';
@@ -550,7 +561,7 @@ function renderPlates() {
   const wrapW = wrap.getBoundingClientRect().width || 320;
   const perRow = Math.max(1, Math.min(plates.length, Math.floor(wrapW / 260)));
   const cardW = Math.max(200, Math.min(420, (wrapW - perRow * 20) / perRow));
-  plates.forEach(pl => {
+  plates.forEach((pl, k) => {
     const card = document.createElement('div');
     card.className = 'plate-card';
     const cv = document.createElement('canvas');
@@ -560,9 +571,11 @@ function renderPlates() {
     const sw = pl.color === null ? '' : `<i class="swatch" style="background:${state.palette[pl.color]}"></i>`;
     cap.innerHTML = `${sw}<span>${plateLabel(pl)}</span><em>${pl.pieces.length}</em>`;
     card.appendChild(cap);
+    card.addEventListener('click', () => { curPlate = k; drawCurPlate3D(); });
     wrap.appendChild(card);
     drawPlate(cv, pl, model.c, state.palette, state.colors, cardW);
   });
+  if ($('#view-plates').style.display !== 'none') drawCurPlate3D();
 }
 
 const hintEnabled = () => state.hintCube && state.colors === 4;
@@ -845,7 +858,7 @@ function init() {
       bar.classList.toggle('mode-hint', view === 'hint');
       if (!model) return;
       if (view === 'net') drawNet($('#net-canvas'), model, state.palette, state.colors);
-      else if (view === 'plates') renderPlates();
+      else if (view === 'plates') renderPlates(); // also re-inits the 3D plate
       else drawHint($('#hint-canvas'), model, state.palette, state.hintEdge, state.hintFrame);
     });
   });
